@@ -1,0 +1,22 @@
+[Unit]
+Description=TraceCart storefront and telemetry collector
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/srv/tracecart/current
+EnvironmentFile=/srv/tracecart/shared/tracecart.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=4
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/tracecart/shared/data
+
+[Install]
+WantedBy=multi-user.target
