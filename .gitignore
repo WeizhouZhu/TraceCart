@@ -11,7 +11,7 @@ coverage/
 # Runtime and local data
 *.log
 *.pid
-data/
+/data/
 uploads/
 
 # Local configuration and secrets
