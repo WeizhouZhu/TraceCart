@@ -15,7 +15,6 @@ import {
   Star,
   Truck,
   X,
-  Zap,
 } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -38,7 +37,7 @@ function useTitle(title: string) {
 }
 
 export function HomePage() {
-  useTitle("品质生活模拟商城");
+  useTitle("品质生活商城");
   const featured = products.filter((product) => product.featured).slice(0, 10);
   const newItems = products.filter((product) => product.isNew).slice(0, 5);
   const heroProduct = products[0];
@@ -80,10 +79,10 @@ export function HomePage() {
 
       <section className="trust-row">
         <div className="container">
-          <span><Truck size={21} /><strong>模拟极速配送</strong><small>完整配送选择流程</small></span>
-          <span><ShieldCheck size={21} /><strong>无真实扣款</strong><small>安全的支付状态演示</small></span>
-          <span><RefreshCw size={21} /><strong>30 天退换演示</strong><small>完整售后信息结构</small></span>
-          <span><PackageCheck size={21} /><strong>品质商品数据</strong><small>多规格与真实库存状态</small></span>
+          <span><Truck size={21} /><strong>快速配送</strong><small>多种配送方式灵活选择</small></span>
+          <span><ShieldCheck size={21} /><strong>安全支付</strong><small>多重保护，支付更安心</small></span>
+          <span><RefreshCw size={21} /><strong>30 天无忧退换</strong><small>售后流程清晰便捷</small></span>
+          <span><PackageCheck size={21} /><strong>品质保障</strong><small>严格选品与库存管理</small></span>
         </div>
       </section>
 
@@ -91,7 +90,7 @@ export function HomePage() {
         <SectionHeader
           eyebrow="SHOP BY CATEGORY"
           title="按你的生活方式探索"
-          description="八个精心组织的商品分类，每一个都包含真实规格、筛选与购买流程。"
+          description="八个精心组织的商品分类，丰富规格与筛选帮助你快速找到心仪好物。"
         />
         <div className="category-grid">
           {categories.map((category, index) => (
@@ -150,10 +149,10 @@ export function HomePage() {
 
       <section className="newsletter">
         <div className="container newsletter__inner">
-          <div><span className="eyebrow">TRACE CART LAB</span><h2>这不是一封真的营销邮件</h2><p>输入框仅用于模拟真实交互，内容不会进入轨迹数据。</p></div>
+          <div><span className="eyebrow">WEEKLY EDIT</span><h2>订阅 TraceCart 灵感周报</h2><p>新品、编辑精选与限时优惠，每周送达你的邮箱。</p></div>
           <form onSubmit={(event) => event.preventDefault()} data-track-mask>
-            <input placeholder="example@demo.local" aria-label="演示邮箱" />
-            <button className="button button--primary">订阅演示</button>
+            <input placeholder="请输入邮箱地址" aria-label="订阅邮箱" />
+            <button className="button button--primary">立即订阅</button>
           </form>
         </div>
       </section>
@@ -366,7 +365,7 @@ export function ProductPage() {
             <button className={favorite ? "active" : ""} onClick={() => toggleFavorite(product.id)}><Heart size={17} fill={favorite ? "currentColor" : "none"} />{favorite ? "已收藏" : "收藏商品"}</button>
             <button className={compared ? "active" : ""} onClick={() => toggleCompare(product.id)}><GitCompareArrows size={17} />{compared ? "已加入对比" : "加入对比"}</button>
           </div>
-          <div className="service-promises"><span><ShieldCheck size={17} />模拟正品保障</span><span><RefreshCw size={17} />7 天退换演示</span><span><PackageCheck size={17} />两年模拟质保</span></div>
+          <div className="service-promises"><span><ShieldCheck size={17} />正品保障</span><span><RefreshCw size={17} />7 天无理由退换</span><span><PackageCheck size={17} />两年质保</span></div>
         </div>
       </section>
 
@@ -376,8 +375,8 @@ export function ProductPage() {
         </div>
         {tab === "detail" && <div className="detail-story"><span className="eyebrow">DESIGNED FOR EVERYDAY</span><h2>{product.subtitle}</h2><p>{product.description}</p><div className="highlight-grid">{product.highlights.map((item, index) => <div key={item}><strong>0{index + 1}</strong><span>{item}</span></div>)}</div><img src={product.images[1]} alt="" /></div>}
         {tab === "spec" && <div className="spec-table">{Object.entries(product.specifications).map(([name, value]) => <div key={name}><span>{name}</span><strong>{value}</strong></div>)}</div>}
-        {tab === "reviews" && <div className="review-layout"><div className="review-summary"><strong>{product.rating.toFixed(1)}</strong><Rating value={product.rating} /><span>来自 {product.reviewCount.toLocaleString("zh-CN")} 条模拟评价</span></div><div className="review-list">{product.reviews.map((review) => <article key={review.id}><Rating value={review.rating} compact /><h3>{review.title}</h3><p>{review.content}</p><div><span>{review.author}</span><time>{new Date(review.date).toLocaleDateString("zh-CN")}</time></div></article>)}</div></div>}
-        {tab === "faq" && <div className="faq-list">{["这是实际交易吗？","商品数据会保持一致吗？","支付会真的扣款吗？","为什么需要复杂的购物流程？"].map((question, index) => <details key={question} open={index === 0}><summary>{question}<ChevronRight size={16} /></summary><p>{["不是。TraceCart 是用于轨迹和请求数据采集的高保真模拟商城。","Fixture 使用稳定种子生成，刷新后商品、SKU 和基础价格保持一致。","不会。所有支付渠道都是 Mock 状态机，只展示成功或失败流程。","复杂流程能够产生更丰富、可比较的搜索、决策和异常恢复轨迹。"][index]}</p></details>)}</div>}
+        {tab === "reviews" && <div className="review-layout"><div className="review-summary"><strong>{product.rating.toFixed(1)}</strong><Rating value={product.rating} /><span>来自 {product.reviewCount.toLocaleString("zh-CN")} 条用户评价</span></div><div className="review-list">{product.reviews.map((review) => <article key={review.id}><Rating value={review.rating} compact /><h3>{review.title}</h3><p>{review.content}</p><div><span>{review.author}</span><time>{new Date(review.date).toLocaleDateString("zh-CN")}</time></div></article>)}</div></div>}
+        {tab === "faq" && <div className="faq-list">{["下单后什么时候发货？","商品是否提供质保？","支持哪些支付方式？","如何申请退换货？"].map((question, index) => <details key={question} open={index === 0}><summary>{question}<ChevronRight size={16} /></summary><p>{["现货商品通常会在付款后 24 小时内完成出库。","不同商品的质保期限以详情页说明为准，核心商品提供两年质保。","支持扫码支付、快捷卡支付、跳转支付及货到付款。","在订单详情中提交售后申请，符合条件的商品支持 7 天无理由退换。"][index]}</p></details>)}</div>}
       </section>
 
       <section className="page-section">
@@ -419,7 +418,7 @@ export function CartPage() {
             {cartSubtotal < 50000 && <div className="progress-note"><span>再购 {money(50000 - cartSubtotal)} 可享满 500 减 40</span><i><em style={{ width: Math.min(100, cartSubtotal / 500) + "%" }} /></i></div>}
             <div className="summary-total"><span>预计应付</span><strong>{money(total)}</strong></div>
             <button className="button button--primary button--full button--large" disabled={!selected.length} onClick={() => { trackBusiness("begin_checkout", { itemCount: selected.length, total }); navigate("/checkout"); }}>去结算 ({selected.length})</button>
-            <p><ShieldCheck size={15} />价格与库存将在下一步进行最终模拟确认</p>
+            <p><ShieldCheck size={15} />价格与库存将在下一步进行最终确认</p>
           </aside>
         </div>
       )}
@@ -436,7 +435,7 @@ export function FavoritesPage() {
   const { favorites } = useStore();
   useTitle("我的收藏");
   const items = favorites.map(getProductById).filter(Boolean) as typeof products;
-  return <div className="container simple-page"><Breadcrumbs items={[{ label: "我的收藏" }]} /><div className="page-title-row"><div><span className="eyebrow">SAVED ITEMS</span><h1>我的收藏</h1><p>收藏保存在当前匿名浏览器会话中。</p></div><span className="result-count"><strong>{items.length}</strong><span>件商品</span></span></div><ProductGrid items={items} emptyText="还没有收藏商品" /></div>;
+  return <div className="container simple-page"><Breadcrumbs items={[{ label: "我的收藏" }]} /><div className="page-title-row"><div><span className="eyebrow">SAVED ITEMS</span><h1>我的收藏</h1><p>收藏内容保存在当前浏览器中。</p></div><span className="result-count"><strong>{items.length}</strong><span>件商品</span></span></div><ProductGrid items={items} emptyText="还没有收藏商品" /></div>;
 }
 
 export function ComparePage() {
@@ -460,14 +459,14 @@ export function ComparePage() {
   );
 }
 
-export function AboutPage() {
-  useTitle("关于演示");
+export function ServicePage() {
+  useTitle("配送与售后");
   return (
     <div className="container prose-page">
-      <Breadcrumbs items={[{ label: "关于演示" }]} />
-      <span className="eyebrow">ABOUT THIS EXPERIENCE</span><h1>一个真实交互、但不发生真实交易的商城</h1>
-      <p className="lead">TraceCart 为请求特征与交互轨迹采集提供复杂、可控的任务环境。商品、库存、订单和支付均为模拟。</p>
-      <div className="info-grid"><div><Zap /><h3>高保真流程</h3><p>搜索、筛选、规格、购物车、结算与支付都有完整状态。</p></div><div><ShieldCheck /><h3>不采集敏感输入</h3><p>地址、电话与备注区域受到屏蔽，请始终使用虚构数据。</p></div><div><Clock3 /><h3>可复现场景</h3><p>通过场景控制台固定库存、网络和支付结果。</p></div></div>
+      <Breadcrumbs items={[{ label: "配送与售后" }]} />
+      <span className="eyebrow">CUSTOMER CARE</span><h1>从下单到售后，每一步都清晰可靠</h1>
+      <p className="lead">我们提供灵活配送、安全支付和便捷退换服务，让你可以更安心地挑选每一件商品。</p>
+      <div className="info-grid"><div><Truck /><h3>灵活配送</h3><p>支持标准配送、次日达、预约配送和门店自提。</p></div><div><RefreshCw /><h3>无忧退换</h3><p>符合条件的商品支持 7 天无理由退换，售后进度随时可查。</p></div><div><ShieldCheck /><h3>安全支付</h3><p>多种付款方式可选，订单和支付信息均受到加密保护。</p></div></div>
     </div>
   );
 }

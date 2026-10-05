@@ -554,10 +554,10 @@ main { min-height: 65vh; }
 .redirect-amount span, .redirect-amount strong, .redirect-amount small { display: block; }
 .redirect-amount strong { font-size: 36px; margin: 8px 0; }
 .redirect-amount small { color: var(--muted); }
-.mock-account { padding: 15px; display: flex; justify-content: space-between; border: 1px solid var(--line); border-radius: 7px; margin-bottom: 18px; }
-.mock-account span, .mock-account strong { display: block; }
-.mock-account span { color: var(--muted); font-size: 10px; }
-.mock-account em { color: var(--green); font-style: normal; font-size: 11px; }
+.payment-account { padding: 15px; display: flex; justify-content: space-between; border: 1px solid var(--line); border-radius: 7px; margin-bottom: 18px; }
+.payment-account span, .payment-account strong { display: block; }
+.payment-account span { color: var(--muted); font-size: 10px; }
+.payment-account em { color: var(--green); font-style: normal; font-size: 11px; }
 
 .payment-result { padding: 70px 0 100px; max-width: 850px; }
 .result-hero { padding: 55px; text-align: center; background: white; border-radius: 11px; border-top: 5px solid; }

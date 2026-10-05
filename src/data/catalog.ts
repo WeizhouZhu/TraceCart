@@ -131,7 +131,7 @@ export const products: Product[] = seeds.map((seed, index) => {
     brand: seed.brand,
     categoryId: seed.categoryId,
     description: `${seed.title} 将可靠功能、克制设计与日常使用体验结合，适合希望在性能和质感之间取得平衡的用户。`,
-    highlights: [seed.subtitle, "两年模拟质保", "支持 7 天无理由退货演示"],
+    highlights: [seed.subtitle, "两年品质质保", "支持 7 天无理由退货"],
     images: [seed.image, seed.image.replace("w=1200", "w=1000"), seed.image.replace("q=82", "q=72")],
     variants: makeVariants(seed, index),
     rating: Math.min(5, Number(rating.toFixed(1))),

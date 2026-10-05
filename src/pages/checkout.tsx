@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -22,6 +22,7 @@ import QRCode from "qrcode";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Breadcrumbs } from "../components";
 import { getProductById, getVariant } from "../data/catalog";
+import { isCheckoutAddressValid } from "../lib/checkout";
 import { api } from "../lib/api";
 import { money } from "../lib/catalog";
 import { createId } from "../lib/id";
@@ -54,29 +55,8 @@ export function CheckoutPage() {
   const discount = cartSubtotal >= 50000 ? 4000 : couponStatus === "valid" ? 3000 : 0;
   const shipping = deliveryPrices[checkout.deliveryMethod];
   const total = Math.max(0, cartSubtotal - discount + shipping);
-
-  const addressValid =
-    checkout.address.recipient.trim().length >= 2 &&
-    /^1\\d{10}$/.test(checkout.address.phone) &&
-    checkout.address.province &&
-    checkout.address.city &&
-    checkout.address.district &&
-    checkout.address.detail.trim().length >= 5;
-
-  function fillDemoAddress() {
-    updateCheckout({
-      address: {
-        recipient: "测试用户",
-        phone: "13800000000",
-        province: "广东省",
-        city: "广州市",
-        district: "天河区",
-        detail: "演示路 88 号 TraceCart 测试地址",
-        postalCode: "510000",
-      },
-    });
-    trackBusiness("fill_demo_address");
-  }
+  const payableTotal = total + (checkout.giftWrap ? 1200 : 0);
+  const addressValid = isCheckoutAddressValid(checkout.address);
 
   function applyCoupon() {
     setCouponStatus(checkout.couponCode.toUpperCase() === "TRACE30" ? "valid" : "invalid");
@@ -93,12 +73,12 @@ export function CheckoutPage() {
     try {
       const order = await api.createOrder({
         items: selected,
-        quote: { subtotal: cartSubtotal, discount, shipping, total },
+        quote: { subtotal: cartSubtotal, discount, shipping, total: payableTotal },
         checkout,
         idempotencyKey: createId(),
       });
       const payment = await api.createPayment(order.id, "qr");
-      trackBusiness("order_created", { orderId: order.id, paymentId: payment.id, total });
+      trackBusiness("order_created", { orderId: order.id, paymentId: payment.id, total: payableTotal });
       clearCart();
       navigate("/payment/" + payment.id, { state: { orderToken: order.token } });
     } catch (cause) {
@@ -117,7 +97,7 @@ export function CheckoutPage() {
     <div className="container checkout-page">
       <Breadcrumbs items={[{ label: "购物车", to: "/cart" }, { label: "游客结算" }]} />
       <div className="checkout-header">
-        <div><span className="eyebrow">SECURE DEMO CHECKOUT</span><h1>游客结算</h1><p>不要填写真实个人信息，建议使用一键测试地址。</p></div>
+        <div><span className="eyebrow">SECURE CHECKOUT</span><h1>游客结算</h1><p>填写配送信息，无需注册账号即可完成购买。</p></div>
         <div className="checkout-steps">
           {["配送信息", "配送方式", "优惠选项", "确认订单"].map((label, index) => (
             <button key={label} className={step === index + 1 ? "active" : step > index + 1 ? "done" : ""} onClick={() => index + 1 < step && setStep(index + 1)}>
@@ -131,16 +111,16 @@ export function CheckoutPage() {
         <section className="checkout-panel">
           {step === 1 && (
             <div className="checkout-section">
-              <div className="checkout-section__title"><div><span className="eyebrow">STEP 01</span><h2>配送信息</h2></div><button className="text-button" onClick={fillDemoAddress}>一键填入测试地址</button></div>
-              <div className="notice notice--info"><ShieldCheck size={18} /><span><strong>隐私提示</strong>本页仅用于交互模拟，请勿填写真实姓名、电话或地址。</span></div>
+              <div className="checkout-section__title"><div><span className="eyebrow">STEP 01</span><h2>配送信息</h2></div></div>
+              <div className="notice notice--info"><ShieldCheck size={18} /><span><strong>隐私保护</strong>您的联系方式仅用于订单配送和必要的售后服务。</span></div>
               <div className="form-grid" data-track-mask>
-                <label><span>收货人 *</span><input value={checkout.address.recipient} onChange={(event) => updateCheckout({ address: { ...checkout.address, recipient: event.target.value } })} placeholder="测试用户" /></label>
+                <label><span>收货人 *</span><input value={checkout.address.recipient} onChange={(event) => updateCheckout({ address: { ...checkout.address, recipient: event.target.value } })} placeholder="请输入收货人姓名" /></label>
                 <label><span>手机号 *</span><input value={checkout.address.phone} onChange={(event) => updateCheckout({ address: { ...checkout.address, phone: event.target.value } })} placeholder="13800000000" /></label>
                 <label><span>省份 *</span><select value={checkout.address.province} onChange={(event) => updateCheckout({ address: { ...checkout.address, province: event.target.value } })}><option value="">请选择</option><option>广东省</option><option>浙江省</option><option>上海市</option><option>北京市</option></select></label>
                 <label><span>城市 *</span><select value={checkout.address.city} onChange={(event) => updateCheckout({ address: { ...checkout.address, city: event.target.value } })}><option value="">请选择</option><option>广州市</option><option>深圳市</option><option>杭州市</option><option>上海市</option><option>北京市</option></select></label>
                 <label><span>区县 *</span><select value={checkout.address.district} onChange={(event) => updateCheckout({ address: { ...checkout.address, district: event.target.value } })}><option value="">请选择</option><option>天河区</option><option>越秀区</option><option>南山区</option><option>西湖区</option><option>浦东新区</option></select></label>
                 <label><span>邮政编码</span><input value={checkout.address.postalCode} onChange={(event) => updateCheckout({ address: { ...checkout.address, postalCode: event.target.value } })} placeholder="510000" /></label>
-                <label className="full"><span>详细地址 *</span><textarea value={checkout.address.detail} onChange={(event) => updateCheckout({ address: { ...checkout.address, detail: event.target.value } })} placeholder="请使用虚构的测试地址" /></label>
+                <label className="full"><span>详细地址 *</span><textarea value={checkout.address.detail} onChange={(event) => updateCheckout({ address: { ...checkout.address, detail: event.target.value } })} placeholder="街道、楼栋、门牌号" /></label>
               </div>
               <div className="step-actions"><Link className="button button--ghost" to="/cart"><ArrowLeft size={17} />返回购物车</Link><button className="button button--primary" disabled={!addressValid} onClick={() => { setStep(2); trackBusiness("checkout_step", { step: 2 }); }}>选择配送方式<ArrowRight size={17} /></button></div>
             </div>
@@ -154,7 +134,7 @@ export function CheckoutPage() {
                   ["standard", "标准配送", "预计 2–3 个工作日", "免费", Truck],
                   ["next-day", "次日达", "明日 18:00 前送达", money(1800), Clock3],
                   ["scheduled", "预约配送", "选择希望送达的时间段", money(2600), MapPin],
-                  ["pickup", "到店自提演示", "广州天河体验点", "免费", PackageCheck],
+                  ["pickup", "到店自提", "广州天河体验点", "免费", PackageCheck],
                 ].map(([value, title, description, price, Icon]) => (
                   <label className={checkout.deliveryMethod === value ? "selected" : ""} key={String(value)}>
                     <input type="radio" name="delivery" checked={checkout.deliveryMethod === value} onChange={() => updateCheckout({ deliveryMethod: value as typeof checkout.deliveryMethod })} />
@@ -177,9 +157,9 @@ export function CheckoutPage() {
               </div>
               <div className="option-list">
                 <label><input type="checkbox" checked={checkout.giftWrap} onChange={(event) => updateCheckout({ giftWrap: event.target.checked })} /><span><strong>礼品包装</strong><small>使用可回收包装纸与祝福卡片</small></span><em>{money(1200)}</em></label>
-                <label><input type="checkbox" checked={checkout.invoice} onChange={(event) => updateCheckout({ invoice: event.target.checked })} /><span><strong>需要发票演示</strong><small>仅记录是否选择，不采集真实抬头</small></span><em>免费</em></label>
+                <label><input type="checkbox" checked={checkout.invoice} onChange={(event) => updateCheckout({ invoice: event.target.checked })} /><span><strong>需要发票</strong><small>订单完成后可申请电子普通发票</small></span><em>免费</em></label>
               </div>
-              <label className="note-field" data-track-mask><span>订单备注</span><textarea value={checkout.note} onChange={(event) => updateCheckout({ note: event.target.value })} placeholder="请勿填写真实敏感信息" /></label>
+              <label className="note-field" data-track-mask><span>订单备注</span><textarea value={checkout.note} onChange={(event) => updateCheckout({ note: event.target.value })} placeholder="选填，可填写配送时间等要求" /></label>
               <div className="step-actions"><button className="button button--ghost" onClick={() => setStep(2)}><ArrowLeft size={17} />上一步</button><button className="button button--primary" onClick={() => { setStep(4); trackBusiness("checkout_step", { step: 4 }); }}>确认订单<ArrowRight size={17} /></button></div>
             </div>
           )}
@@ -188,7 +168,7 @@ export function CheckoutPage() {
             <div className="checkout-section">
               <div className="checkout-section__title"><div><span className="eyebrow">STEP 04</span><h2>确认订单</h2></div></div>
               <div className="review-block"><div><strong>配送信息</strong><button onClick={() => setStep(1)}>修改</button></div><p>{checkout.address.recipient} · {checkout.address.phone}</p><span>{checkout.address.province} {checkout.address.city} {checkout.address.district} {checkout.address.detail}</span></div>
-              <div className="review-block"><div><strong>配送方式</strong><button onClick={() => setStep(2)}>修改</button></div><p>{{ standard: "标准配送", "next-day": "次日达", scheduled: "预约配送", pickup: "到店自提演示" }[checkout.deliveryMethod]}</p></div>
+              <div className="review-block"><div><strong>配送方式</strong><button onClick={() => setStep(2)}>修改</button></div><p>{{ standard: "标准配送", "next-day": "次日达", scheduled: "预约配送", pickup: "到店自提" }[checkout.deliveryMethod]}</p></div>
               <div className="checkout-products">{selected.map((item) => { const product = getProductById(item.productId); if (!product) return null; const variant = getVariant(product, item.variantId); return <div key={item.id}><img src={variant.image ?? product.images[0]} alt="" /><span><strong>{product.title}</strong><small>{Object.values(variant.attributes).join(" · ")} · 数量 {item.quantity}</small></span><em>{money(variant.price * item.quantity)}</em></div>; })}</div>
               {error && <div className="notice notice--error"><AlertCircle size={18} /><span>{error}</span></div>}
               <div className="step-actions"><button className="button button--ghost" onClick={() => setStep(3)} disabled={submitting}><ArrowLeft size={17} />上一步</button><button className="button button--primary button--large" onClick={placeOrder} disabled={submitting}>{submitting ? <><LoaderCircle className="spin" size={18} />正在创建订单</> : <>提交订单并支付<ArrowRight size={17} /></>}</button></div>
@@ -203,8 +183,8 @@ export function CheckoutPage() {
           <div><span>优惠</span><strong className="discount">-{money(discount)}</strong></div>
           <div><span>配送</span><strong>{shipping ? money(shipping) : "免费"}</strong></div>
           {checkout.giftWrap && <div><span>礼品包装</span><strong>{money(1200)}</strong></div>}
-          <div className="summary-total"><span>应付金额</span><strong>{money(total + (checkout.giftWrap ? 1200 : 0))}</strong></div>
-          <p><ShieldCheck size={15} />这是模拟结算，不会产生真实订单或扣款。</p>
+          <div className="summary-total"><span>应付金额</span><strong>{money(payableTotal)}</strong></div>
+          <p><ShieldCheck size={15} />结算与支付信息全程加密保护</p>
         </aside>
       </div>
     </div>
@@ -263,23 +243,23 @@ export function PaymentPage() {
 
   return (
     <div className="payment-page">
-      <div className="payment-topbar"><Link to="/"><span className="brand__mark">T</span><strong>TraceCart Pay</strong></Link><span><ShieldCheck size={17} />安全模拟支付 · 不会扣款</span></div>
+      <div className="payment-topbar"><Link to="/"><span className="brand__mark">T</span><strong>TraceCart Pay</strong></Link><span><ShieldCheck size={17} />安全支付 · 信息加密保护</span></div>
       <div className="payment-shell">
-        <div className="payment-order-head"><div><span>订单号 {order.id}</span><small>请在倒计时结束前完成模拟操作</small></div><div><span>应付金额</span><strong>{money(payment.amount)}</strong></div></div>
+        <div className="payment-order-head"><div><span>订单号 {order.id}</span><small>请在倒计时结束前完成支付</small></div><div><span>应付金额</span><strong>{money(payment.amount)}</strong></div></div>
         <div className="payment-layout">
           <aside className="payment-methods">
             <h3>选择支付方式</h3>
             <button className={payment.method === "qr" ? "active" : ""} onClick={() => changeMethod("qr")}><QrCode size={21} /><span><strong>扫码支付</strong><small>使用手机打开确认页</small></span><Check size={16} /></button>
-            <button onClick={() => changeMethod("redirect")}><Smartphone size={21} /><span><strong>跳转支付</strong><small>前往模拟第三方收银台</small></span></button>
-            <button onClick={() => changeMethod("card-demo")}><CreditCard size={21} /><span><strong>快捷卡支付</strong><small>不需要输入真实卡号</small></span></button>
-            <button onClick={() => changeMethod("cod")}><Banknote size={21} /><span><strong>货到付款</strong><small>立即模拟支付成功</small></span></button>
+            <button onClick={() => changeMethod("redirect")}><Smartphone size={21} /><span><strong>跳转支付</strong><small>前往 QuickPay 收银台</small></span></button>
+            <button onClick={() => changeMethod("quick-card")}><CreditCard size={21} /><span><strong>快捷卡支付</strong><small>使用已绑定的银行卡</small></span></button>
+            <button onClick={() => changeMethod("cod")}><Banknote size={21} /><span><strong>货到付款</strong><small>收货时完成付款</small></span></button>
           </aside>
           <section className="qr-panel">
-            <span className="eyebrow">SCAN TO CONFIRM</span><h1>扫描二维码完成模拟支付</h1>
-            <p>使用另一台手机扫描，或点击下方“本机模拟确认”。</p>
-            <div className="qr-box">{qrUrl ? <img src={qrUrl} alt="模拟支付二维码" /> : <LoaderCircle className="spin" />}{payment.status === "expired" && <div className="qr-expired">二维码已过期</div>}</div>
+            <span className="eyebrow">SCAN TO PAY</span><h1>扫描二维码完成支付</h1>
+            <p>使用手机扫描二维码，或在本机继续完成付款。</p>
+            <div className="qr-box">{qrUrl ? <img src={qrUrl} alt="支付二维码" /> : <LoaderCircle className="spin" />}{payment.status === "expired" && <div className="qr-expired">二维码已过期</div>}</div>
             <div className="countdown"><Clock3 size={17} />剩余 {String(Math.floor(remaining / 60)).padStart(2, "0")}:{String(remaining % 60).padStart(2, "0")}</div>
-            <Link className="button button--dark" to={"/payment/confirm/" + payment.id}>本机打开模拟确认页</Link>
+            <Link className="button button--dark" to={"/payment/confirm/" + payment.id}>在本机继续支付</Link>
             <div className="payment-waiting"><span className="pulse-dot" /><span><strong>等待支付确认</strong><small>页面会自动更新，无需手动刷新</small></span></div>
           </section>
         </div>
@@ -293,7 +273,7 @@ export function PaymentConfirmPage() {
   const [payment, setPayment] = useState<PaymentSession | null>(null);
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState("");
-  useTitle("确认模拟支付");
+  useTitle("确认支付");
 
   useEffect(() => { if (paymentId) api.getPayment(paymentId).then(setPayment).catch(() => setMessage("支付会话不存在或已失效")); }, [paymentId]);
 
@@ -315,9 +295,9 @@ export function PaymentConfirmPage() {
   return (
     <div className="companion-page">
       <div className="companion-card">
-        <span className="brand__mark">T</span><span className="eyebrow">TRACECART COMPANION</span><h1>确认模拟支付</h1>
+        <span className="brand__mark">T</span><span className="eyebrow">TRACECART PAY</span><h1>确认支付</h1>
         {payment && <><div className="companion-amount"><span>支付金额</span><strong>{money(payment.amount)}</strong></div><p>订单 {payment.orderId}</p></>}
-        <div className="notice notice--info"><ShieldCheck size={18} /><span>这是模拟支付，不会调用真实支付渠道，也不会产生扣款。</span></div>
+        <div className="notice notice--info"><ShieldCheck size={18} /><span>请核对订单金额，确认后将返回订单结果页。</span></div>
         {message ? <div className={payment?.status === "succeeded" ? "result-inline success" : "result-inline error"}>{payment?.status === "succeeded" ? <CheckCircle2 /> : <XCircle />}<strong>{message}</strong></div> : <button className="button button--primary button--full button--large" onClick={confirm} disabled={!payment || processing}>{processing ? <><LoaderCircle className="spin" />处理中</> : "确认支付"}</button>}
       </div>
     </div>
@@ -329,7 +309,7 @@ export function RedirectPaymentPage() {
   const navigate = useNavigate();
   const [payment, setPayment] = useState<PaymentSession | null>(null);
   const [processing, setProcessing] = useState(false);
-  useTitle("QuickPay 模拟收银台");
+  useTitle("QuickPay 收银台");
   useEffect(() => { if (paymentId) api.getPayment(paymentId).then(setPayment); }, [paymentId]);
 
   async function finish(confirm: boolean) {
@@ -346,13 +326,12 @@ export function RedirectPaymentPage() {
 
   return (
     <div className="redirect-pay">
-      <header><strong>QUICK<span>PAY</span></strong><em>独立模拟收银台</em></header>
+      <header><strong>QUICK<span>PAY</span></strong><em>快捷安全收银台</em></header>
       <main>
         <div className="redirect-merchant"><span className="brand__mark">T</span><div><small>商户</small><strong>TraceCart Store</strong></div></div>
         <div className="redirect-amount"><span>应付金额</span><strong>{payment ? money(payment.amount) : "—"}</strong><small>订单 {payment?.orderId ?? "加载中"}</small></div>
-        <div className="mock-account"><div><span>演示账户</span><strong>QuickPay 测试余额</strong></div><em>无需登录</em></div>
-        <div className="notice notice--info"><ShieldCheck size={18} /><span>本页面为原创模拟界面，不代表任何真实支付机构。</span></div>
-        <button className="button button--primary button--full button--large" onClick={() => finish(true)} disabled={!payment || processing}>{processing ? <><LoaderCircle className="spin" />正在返回商户</> : "确认模拟支付"}</button>
+        <div className="payment-account"><div><span>付款账户</span><strong>QuickPay 余额</strong></div><em>无需登录</em></div>
+        <button className="button button--primary button--full button--large" onClick={() => finish(true)} disabled={!payment || processing}>{processing ? <><LoaderCircle className="spin" />正在返回商户</> : "确认支付"}</button>
         <button className="text-button centered" onClick={() => finish(false)} disabled={processing}>取消并返回商户</button>
       </main>
     </div>
@@ -375,8 +354,8 @@ export function PaymentResultPage() {
   if (!payment || !order) return <PaymentLoading />;
   const success = payment.status === "succeeded";
   const errorMessages: Record<string, string> = {
-    insufficient_funds: "模拟账户余额不足",
-    risk_rejected: "本次交易未通过模拟风险检查",
+    insufficient_funds: "账户余额不足",
+    risk_rejected: "本次交易未通过安全检查",
     network_error: "支付网络暂时不可用",
     expired: "支付会话已过期",
   };
@@ -386,12 +365,12 @@ export function PaymentResultPage() {
       <div className={"result-hero " + (success ? "success" : "failure")}>
         {success ? <CheckCircle2 size={58} /> : <XCircle size={58} />}
         <span className="eyebrow">{success ? "PAYMENT COMPLETE" : "PAYMENT INTERRUPTED"}</span>
-        <h1>{success ? "模拟支付成功" : errorMessages[payment.outcome] ?? "模拟支付未完成"}</h1>
-        <p>{success ? "订单已进入模拟处理流程，你可以查看完整订单或继续购物。" : "订单仍然保留，可以更换支付方式或重新尝试。"}</p>
+        <h1>{success ? "支付成功" : errorMessages[payment.outcome] ?? "支付未完成"}</h1>
+        <p>{success ? "订单已进入处理流程，你可以查看订单详情或继续购物。" : "订单仍然保留，可以更换支付方式或重新尝试。"}</p>
         <strong>{money(payment.amount)}</strong>
       </div>
       <div className="result-order-card">
-        <div><span>订单编号</span><strong>{order.id}</strong></div><div><span>支付方式</span><strong>{{ qr: "扫码支付", redirect: "跳转支付", "card-demo": "快捷卡演示", cod: "货到付款" }[payment.method]}</strong></div><div><span>订单状态</span><strong>{success ? "已支付" : "待支付"}</strong></div>
+        <div><span>订单编号</span><strong>{order.id}</strong></div><div><span>支付方式</span><strong>{{ qr: "扫码支付", redirect: "跳转支付", "quick-card": "快捷卡支付", cod: "货到付款" }[payment.method]}</strong></div><div><span>订单状态</span><strong>{success ? "已支付" : "待支付"}</strong></div>
       </div>
       <div className="result-actions">
         {success ? <><Link className="button button--primary" to={"/order/" + order.token}>查看订单</Link><Link className="button button--ghost" to="/">继续购物</Link></> : <><Link className="button button--primary" to={"/payment/" + payment.id}>重新支付</Link><Link className="button button--ghost" to={"/order/" + order.token}>返回订单</Link></>}
@@ -417,7 +396,7 @@ export function OrderPage() {
         <section><h2>商品清单</h2>{order.items.map((item) => { const product = getProductById(item.productId); if (!product) return null; const variant = getVariant(product, item.variantId); return <div className="order-item" key={item.id}><img src={product.images[0]} alt="" /><div><Link to={"/product/" + product.slug}>{product.title}</Link><small>{Object.values(variant.attributes).join(" · ")} · 数量 {item.quantity}</small></div><strong>{money(variant.price * item.quantity)}</strong></div>; })}</section>
         <aside><h2>配送与金额</h2><div><span>收货信息</span><strong>{order.checkout.address.recipient} · {order.checkout.address.phone}</strong><small>{order.checkout.address.province} {order.checkout.address.city} {order.checkout.address.district} {order.checkout.address.detail}</small></div><div><span>商品小计</span><strong>{money(order.quote.subtotal)}</strong></div><div><span>优惠</span><strong>-{money(order.quote.discount)}</strong></div><div><span>配送</span><strong>{order.quote.shipping ? money(order.quote.shipping) : "免费"}</strong></div><div className="summary-total"><span>订单总额</span><strong>{money(order.quote.total)}</strong></div></aside>
       </div>
-      <div className="order-timeline"><span className="done"><i><Check /></i><strong>订单已创建</strong></span><em /><span className={order.status === "paid" ? "done" : ""}><i>{order.status === "paid" ? <Check /> : "2"}</i><strong>支付确认</strong></span><em /><span><i>3</i><strong>模拟配送</strong></span><em /><span><i>4</i><strong>完成</strong></span></div>
+      <div className="order-timeline"><span className="done"><i><Check /></i><strong>订单已创建</strong></span><em /><span className={order.status === "paid" ? "done" : ""}><i>{order.status === "paid" ? <Check /> : "2"}</i><strong>支付确认</strong></span><em /><span><i>3</i><strong>商品配送</strong></span><em /><span><i>4</i><strong>完成</strong></span></div>
     </div>
   );
 }

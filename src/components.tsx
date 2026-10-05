@@ -17,6 +17,7 @@ import {
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { categories, getProductById, getVariant, products } from "./data/catalog";
 import { getSuggestions, money } from "./lib/catalog";
+import { isCatalogTabActive } from "./lib/navigation";
 import { trackBusiness } from "./lib/telemetry";
 import { useStore } from "./store/AppStore";
 import type { CartItem, Product } from "./types";
@@ -52,6 +53,7 @@ export function PageShell({ children }: { children: ReactNode }) {
 
 function Header() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { cartCount, favorites, setCartOpen } = useStore();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
@@ -81,11 +83,11 @@ function Header() {
       <div className="service-strip">
         <div className="container service-strip__inner">
           <span>配送至：广州市</span>
-          <span className="service-strip__notice">实验商城 · 所有商品与支付均为模拟</span>
+          <span className="service-strip__notice">正品保障 · 满 99 元免运费</span>
           <nav aria-label="辅助导航">
-            <Link to="/collector">采集控制台</Link>
-            <Link to="/lab/scenarios">场景设置</Link>
-            <Link to="/about-demo">关于演示</Link>
+            <Link to="/service">帮助中心</Link>
+            <Link to="/favorites">我的收藏</Link>
+            <Link to="/cart">购物车</Link>
           </nav>
         </div>
       </div>
@@ -229,11 +231,22 @@ function Header() {
           </div>
         </div>
         <nav className="container category-nav" aria-label="主要分类">
-          <NavLink to="/">首页</NavLink>
+          <NavLink to="/" end>首页</NavLink>
           {categories.slice(0, 6).map((category) => (
-            <NavLink key={category.id} to={"/search?category=" + category.slug}>{category.name}</NavLink>
+            <Link
+              className={isCatalogTabActive(location.pathname, location.search, { type: "category", value: category.slug }) ? "active" : undefined}
+              key={category.id}
+              to={"/search?category=" + category.slug}
+            >
+              {category.name}
+            </Link>
           ))}
-          <NavLink to="/search?sort=rating">编辑精选</NavLink>
+          <Link
+            className={isCatalogTabActive(location.pathname, location.search, { type: "sort", value: "rating" }) ? "active" : undefined}
+            to="/search?sort=rating"
+          >
+            编辑精选
+          </Link>
         </nav>
       </header>
     </>
@@ -496,15 +509,15 @@ function Footer() {
             <span className="brand__mark">T</span>
             <span><strong>TraceCart</strong><small>CURATED MARKET</small></span>
           </Link>
-          <p>用于交互轨迹与请求特征采集的高保真模拟商城。所有交易、库存和支付均为演示。</p>
+          <p>发现兼具设计、品质与实用价值的日常好物，让每一次选购都更简单从容。</p>
         </div>
-        <div><strong>购物帮助</strong><Link to="/search">全部商品</Link><Link to="/cart">购物车</Link><Link to="/about-demo">配送说明</Link></div>
-        <div><strong>实验工具</strong><Link to="/collector">采集控制台</Link><Link to="/lab/scenarios">场景设置</Link><Link to="/about-demo">数据说明</Link></div>
-        <div><strong>服务状态</strong><span>Mock API 正常</span><span>轨迹采集已启用</span><span>模拟支付不会扣款</span></div>
+        <div><strong>购物指南</strong><Link to="/search">全部商品</Link><Link to="/cart">购物车</Link><Link to="/service">配送说明</Link></div>
+        <div><strong>客户服务</strong><Link to="/service">退换货政策</Link><Link to="/service">支付与配送</Link><Link to="/favorites">我的收藏</Link></div>
+        <div><strong>联系我们</strong><span>客服时间 9:00–21:00</span><span>配送覆盖全国主要城市</span><span>在线客服全天候响应</span></div>
       </div>
       <div className="container footer-bottom">
-        <span>© 2026 TraceCart Lab</span>
-        <span>仅供研究、测试与演示使用</span>
+        <span>© 2026 TraceCart</span>
+        <span>隐私政策 · 用户协议 · 消费者权益</span>
       </div>
     </footer>
   );

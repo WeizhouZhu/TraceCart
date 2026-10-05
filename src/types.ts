@@ -86,7 +86,7 @@ export interface CheckoutDraft {
   note: string;
 }
 
-export type PaymentMethod = "qr" | "redirect" | "card-demo" | "cod";
+export type PaymentMethod = "qr" | "redirect" | "quick-card" | "cod";
 export type PaymentStatus =
   | "created"
   | "pending"

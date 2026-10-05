@@ -4,7 +4,6 @@ import { PageShell } from "./components";
 import { trackPageView } from "./lib/telemetry";
 import { CollectorPage, ScenarioPage } from "./pages/admin";
 import {
-  AboutPage,
   CartPage,
   ComparePage,
   FavoritesPage,
@@ -12,6 +11,7 @@ import {
   NotFoundPage,
   ProductPage,
   SearchPage,
+  ServicePage,
 } from "./pages/commerce";
 import {
   CheckoutPage,
@@ -42,9 +42,9 @@ function StoreRoutes() {
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/compare" element={<ComparePage />} />
         <Route path="/order/:orderToken" element={<OrderPage />} />
+        <Route path="/service" element={<ServicePage />} />
         <Route path="/collector" element={<CollectorPage />} />
         <Route path="/lab/scenarios" element={<ScenarioPage />} />
-        <Route path="/about-demo" element={<AboutPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </PageShell>
