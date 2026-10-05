@@ -24,6 +24,7 @@ import { Breadcrumbs } from "../components";
 import { getProductById, getVariant } from "../data/catalog";
 import { api } from "../lib/api";
 import { money } from "../lib/catalog";
+import { createId } from "../lib/id";
 import { trackBusiness } from "../lib/telemetry";
 import { useStore } from "../store/AppStore";
 import type { Order, PaymentMethod, PaymentSession } from "../types";
@@ -94,7 +95,7 @@ export function CheckoutPage() {
         items: selected,
         quote: { subtotal: cartSubtotal, discount, shipping, total },
         checkout,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: createId(),
       });
       const payment = await api.createPayment(order.id, "qr");
       trackBusiness("order_created", { orderId: order.id, paymentId: payment.id, total });

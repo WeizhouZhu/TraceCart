@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getProductById, getVariant } from "../data/catalog";
+import { createId } from "../lib/id";
 import { trackBusiness } from "../lib/telemetry";
 import type { CartItem, CheckoutDraft, ScenarioSettings } from "../types";
 
@@ -115,7 +116,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : [
                 ...current.cart,
                 {
-                  id: crypto.randomUUID(),
+                  id: createId(),
                   productId,
                   variantId,
                   quantity,

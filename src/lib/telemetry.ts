@@ -1,6 +1,7 @@
 import type { TelemetryEvent } from "../types";
+import { createId } from "./id";
 
-const pageViewId = crypto.randomUUID();
+const pageViewId = createId();
 let sequence = 0;
 let queue: TelemetryEvent[] = [];
 let initialized = false;
@@ -21,7 +22,7 @@ function safeTarget(target: EventTarget | null) {
 
 function add(eventType: string, payload: Record<string, unknown> = {}) {
   queue.push({
-    id: crypto.randomUUID(),
+    id: createId(),
     pageViewId,
     sequence: ++sequence,
     eventType,
