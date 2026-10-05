@@ -89,7 +89,18 @@ data/
 
 - [systemd 服务](deploy/tracecart.service)
 - [Nginx 配置](deploy/nginx.conf)
+- [服务器端构建与原子发布脚本](deploy/remote-deploy.sh)
 - [数据采集方案](docs/data-collection-plan.zh-CN.md)
 - [电商前端设计](docs/commerce-frontend-design.zh-CN.md)
+
+生产服务器的唯一源码工作副本位于 `/srv/tracecart/source`。服务器端更新流程：
+
+~~~bash
+cd /srv/tracecart/source
+git pull --ff-only origin main
+./deploy/remote-deploy.sh
+~~~
+
+脚本会在服务器上安装依赖、执行类型检查、测试和构建；只有全部通过后才创建新发布目录并切换 `/srv/tracecart/current`。
 
 所有商品、库存、订单和支付均为模拟，不会连接真实支付渠道。
