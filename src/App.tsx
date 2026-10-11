@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { PageShell } from "./components";
-import { trackPageView } from "./lib/telemetry";
-import { CollectorPage, ScenarioPage } from "./pages/admin";
+import { initTelemetry, trackPageView } from "./lib/telemetry";
+import { AdminPage, ClaimPage, HumanPage } from "./pages/operations";
+import { StoreProvider } from "./store/AppStore";
 import {
   CartPage,
   ComparePage,
@@ -45,17 +46,18 @@ function StoreRoutes() {
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/order/:orderToken" element={<OrderPage />} />
         <Route path="/service" element={<ServicePage />} />
-        <Route path="/collector" element={<CollectorPage />} />
-        <Route path="/lab/scenarios" element={<ScenarioPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </PageShell>
   );
 }
 
-export function App() {
+function StorefrontApp() {
+  useEffect(() => {
+    initTelemetry();
+  }, []);
   return (
-    <>
+    <StoreProvider>
       <RouteTelemetry />
       <Routes>
         <Route path="/payment/:paymentId" element={<PaymentPage />} />
@@ -64,6 +66,14 @@ export function App() {
         <Route path="/payment/result/:paymentId" element={<PaymentResultPage />} />
         <Route path="*" element={<StoreRoutes />} />
       </Routes>
-    </>
+    </StoreProvider>
   );
+}
+
+export function App() {
+  const pathname = window.location.pathname;
+  if (pathname === "/admin") return <AdminPage />;
+  if (pathname === "/human") return <HumanPage />;
+  if (pathname === "/c") return <ClaimPage />;
+  return <StorefrontApp />;
 }

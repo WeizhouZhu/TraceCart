@@ -10,11 +10,12 @@ TraceCart 是一个 PC 优先的高保真 Mock 电商与轨迹/请求数据采�
 - 加入购物车、数量修改、选择、删除和撤销。
 - 四步游客结算、虚构测试地址、优惠码 TRACE30。
 - 二维码支付、跳转收银台及 75% 默认成功率。
-- 人类、普通脚本和 AI 的会话级标签任务。
+- Human、普通 Script 和 LLM Agent 的鉴权式一次性采集链接。
 - 鼠标、点击、滚动、页面和业务事件批量采集。
 - 请求和轨迹 NDJSON 原始存储。
 - sessions.parquet、requests.parquet、trajectories.parquet 导出。
-- 可固定网络、库存和支付结果的实验场景控制台。
+- 独立、零采集的统计与接入管理后台。
+- 公网 IP HTTPS、签名 Cookie、Argon2id 密码哈希和 API Key 摘要存储。
 
 ## 本地运行
 
@@ -50,25 +51,32 @@ pnpm run build
 - /product/:slug：商品详情
 - /cart：购物车
 - /checkout：游客结算
-- /collector：标签任务与 Parquet 导出
-- /lab/scenarios：异常场景设置
+- /admin：统计、导出、接入说明和密钥管理；不进入数据集
+- /human：人工参与者验证和专属链接领取；不进入数据集
+- /c#token：统一的一次性链接入口；领取动作不进入数据集
+- /api/collect：Script 和 Agent 的机器可读接入与链接签发 API
 - /api/health：服务健康检查
 
 ## 有标签采集
 
-在 /collector 创建任务后，使用系统生成的链接作为目标客户端的第一个访问地址：
+普通访问 / 只创建 label=null 会话。有标签访问只能通过三类鉴权流程：
 
 ~~~text
-http://SERVER_IP/collect/start/<task-token>
+Script API Key -> POST /api/collect -> /c#token -> label=script
+Agent API Key  -> POST /api/collect -> /c#token -> label=ai
+/human + Human 密码 + nickname -> /c#token -> label=human
 ~~~
 
-也可以让自动化客户端携带：
+Script 与 Agent 可先读取自己的机器可读说明：
 
-~~~text
-X-TraceCart-Task: <task-token>
+~~~bash
+curl https://42.193.237.190/api/collect \
+  -H "Authorization: Bearer <API_KEY>"
 ~~~
 
-未匹配任务的会话标签为 null。系统只记录操作者提供的标签，不执行身份分类。
+所有专属链接只可使用一次、30 分钟有效，标签由服务端根据鉴权凭据写入且不可修改。Token 和 API Key 只保存摘要。
+
+管理页、人工验证、令牌领取、接入 API、健康检查、静态资源和 Nginx 日志均不进入训练数据。只有商城页面、商城业务 API 和已启用采集的会话可以写入 sessions、requests 与 trajectories。
 
 ## 数据目录
 
@@ -77,7 +85,8 @@ X-TraceCart-Task: <task-token>
 ~~~text
 data/
 ├── sessions.json
-├── tasks.json
+├── access-links.json
+├── api-keys.json
 ├── orders.json
 ├── payments.json
 ├── requests.ndjson
@@ -101,6 +110,8 @@ git pull --ff-only origin main
 ./deploy/remote-deploy.sh
 ~~~
 
+
+生产入口为 https://42.193.237.190。80 端口只保留 ACME 验证并强制跳转 HTTPS；IP 证书由 Certbot 自动续期。
 脚本会在服务器上安装依赖、执行类型检查、测试和构建；只有全部通过后才创建新发布目录并切换 `/srv/tracecart/current`。
 
 所有商品、库存、订单和支付均为模拟，不会连接真实支付渠道。

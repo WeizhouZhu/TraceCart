@@ -13,6 +13,10 @@ interface SessionRow {
   userAgent: string;
   requestCount: number;
   trajectoryCount: number;
+  collectionLinkId?: string | null;
+  participantId?: string | null;
+  nickname?: string | null;
+  captureMode?: "unlabeled" | "labeled";
 }
 
 interface RequestRow {
@@ -90,6 +94,10 @@ export async function createParquetExport(sessions: SessionRow[]) {
     user_agent: session.userAgent,
     request_count: session.requestCount,
     trajectory_count: session.trajectoryCount,
+    collection_link_id: session.collectionLinkId ?? undefined,
+    participant_id: session.participantId ?? undefined,
+    nickname: session.nickname ?? undefined,
+    capture_mode: session.captureMode ?? (session.label ? "labeled" : "unlabeled"),
   }));
 
   const requestRows = requests.map((row) => ({
@@ -146,6 +154,10 @@ export async function createParquetExport(sessions: SessionRow[]) {
     user_agent: { type: "UTF8" },
     request_count: { type: "INT64" },
     trajectory_count: { type: "INT64" },
+    collection_link_id: optionalString,
+    participant_id: optionalString,
+    nickname: optionalString,
+    capture_mode: { type: "UTF8" },
   }, sessionRows);
 
   await writeParquet(path.join(directory, "requests.parquet"), {
