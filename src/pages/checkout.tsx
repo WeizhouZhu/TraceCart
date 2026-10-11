@@ -29,6 +29,7 @@ import { createId } from "../lib/id";
 import { trackBusiness } from "../lib/telemetry";
 import { useStore } from "../store/AppStore";
 import type { Order, PaymentMethod, PaymentSession } from "../types";
+import { getOrderStatusMeta } from "./orders";
 
 function useTitle(title: string) {
   useEffect(() => {
@@ -299,6 +300,7 @@ export function PaymentConfirmPage() {
         {payment && <><div className="companion-amount"><span>支付金额</span><strong>{money(payment.amount)}</strong></div><p>订单 {payment.orderId}</p></>}
         <div className="notice notice--info"><ShieldCheck size={18} /><span>请核对订单金额，确认后将返回订单结果页。</span></div>
         {message ? <div className={payment?.status === "succeeded" ? "result-inline success" : "result-inline error"}>{payment?.status === "succeeded" ? <CheckCircle2 /> : <XCircle />}<strong>{message}</strong></div> : <button className="button button--primary button--full button--large" onClick={confirm} disabled={!payment || processing}>{processing ? <><LoaderCircle className="spin" />处理中</> : "确认支付"}</button>}
+        {message && payment && <Link className="button button--ghost button--full" to={"/order/" + payment.orderId}>返回订单</Link>}
       </div>
     </div>
   );
@@ -340,6 +342,8 @@ export function RedirectPaymentPage() {
 
 export function PaymentResultPage() {
   const { paymentId } = useParams();
+  const navigate = useNavigate();
+  const [retrying, setRetrying] = useState(false);
   const [payment, setPayment] = useState<PaymentSession | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState("");
@@ -360,6 +364,20 @@ export function PaymentResultPage() {
     expired: "支付会话已过期",
   };
 
+  async function retryPayment() {
+    if (!order || !payment) return;
+    setRetrying(true);
+    setError("");
+    try {
+      const next = await api.createPayment(order.id, payment.method === "cod" ? "qr" : payment.method);
+      trackBusiness("payment_retried", { orderId: order.id, previousPaymentId: payment.id, paymentId: next.id });
+      navigate(payment.method === "redirect" ? "/payment/redirect/" + next.id : "/payment/" + next.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法重新发起支付");
+      setRetrying(false);
+    }
+  }
+
   return (
     <div className="container payment-result">
       <div className={"result-hero " + (success ? "success" : "failure")}>
@@ -373,7 +391,7 @@ export function PaymentResultPage() {
         <div><span>订单编号</span><strong>{order.id}</strong></div><div><span>支付方式</span><strong>{{ qr: "扫码支付", redirect: "跳转支付", "quick-card": "快捷卡支付", cod: "货到付款" }[payment.method]}</strong></div><div><span>订单状态</span><strong>{success ? "已支付" : "待支付"}</strong></div>
       </div>
       <div className="result-actions">
-        {success ? <><Link className="button button--primary" to={"/order/" + order.token}>查看订单</Link><Link className="button button--ghost" to="/">继续购物</Link></> : <><Link className="button button--primary" to={"/payment/" + payment.id}>重新支付</Link><Link className="button button--ghost" to={"/order/" + order.token}>返回订单</Link></>}
+        <Link className="button button--primary" to={"/order/" + order.token}>{success ? "查看订单" : "返回订单"}</Link>{success ? <Link className="button button--ghost" to="/">继续购物</Link> : <button className="button button--ghost" onClick={retryPayment} disabled={retrying}>{retrying ? <><LoaderCircle className="spin" size={16} />正在发起支付</> : "重新支付"}</button>}
       </div>
     </div>
   );
@@ -381,22 +399,58 @@ export function PaymentResultPage() {
 
 export function OrderPage() {
   const { orderToken } = useParams();
+  const navigate = useNavigate();
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState("");
+  const [acting, setActing] = useState(false);
   useTitle("订单详情");
   useEffect(() => { if (orderToken) api.getOrder(orderToken).then(setOrder).catch((cause) => setError(cause.message)); }, [orderToken]);
   if (error) return <PaymentError message={error} onRetry={() => window.location.reload()} />;
   if (!order) return <PaymentLoading />;
+  const meta = getOrderStatusMeta(order.status);
+  const StatusIcon = meta.icon;
+
+  async function startPayment() {
+    if (!order) return;
+    setActing(true);
+    try {
+      const payment = await api.createPayment(order.id, "qr");
+      trackBusiness("order_payment_started", { orderId: order.id, paymentId: payment.id });
+      navigate("/payment/" + payment.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法发起支付");
+      setActing(false);
+    }
+  }
+
+  async function confirmReceipt() {
+    if (!order) return;
+    setActing(true);
+    try {
+      const updated = await api.confirmReceipt(order.token);
+      setOrder(updated);
+      trackBusiness("order_receipt_confirmed", { orderId: order.id, source: "order_detail" });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "确认收货失败");
+    } finally {
+      setActing(false);
+    }
+  }
 
   return (
     <div className="container order-page">
       <Breadcrumbs items={[{ label: "订单详情" }]} />
-      <div className="order-status-card"><div className="order-status-icon"><PackageCheck /></div><div><span className="eyebrow">ORDER STATUS</span><h1>{order.status === "paid" ? "订单已支付" : "订单等待支付"}</h1><p>订单 {order.id} · 创建于 {new Date(order.createdAt).toLocaleString("zh-CN")}</p></div>{order.status !== "paid" && order.paymentId && <Link className="button button--primary" to={"/payment/" + order.paymentId}>继续支付</Link>}</div>
+      <div className="order-status-card">
+        <div className="order-status-icon"><StatusIcon /></div>
+        <div><span className="eyebrow">ORDER STATUS</span><h1>{meta.label}</h1><p>{meta.description} · 订单 {order.id} · 创建于 {new Date(order.createdAt).toLocaleString("zh-CN")}</p></div>
+        {order.status === "awaiting_payment" && <button className="button button--primary" onClick={startPayment} disabled={acting}>{acting ? <><LoaderCircle className="spin" size={16} />处理中</> : "继续支付"}</button>}
+        {order.status === "shipped" && <button className="button button--primary" onClick={confirmReceipt} disabled={acting}>{acting ? <><LoaderCircle className="spin" size={16} />处理中</> : "确认收货"}</button>}
+      </div>
       <div className="order-layout">
         <section><h2>商品清单</h2>{order.items.map((item) => { const product = getProductById(item.productId); if (!product) return null; const variant = getVariant(product, item.variantId); return <div className="order-item" key={item.id}><img src={product.images[0]} alt="" /><div><Link to={"/product/" + product.slug}>{product.title}</Link><small>{Object.values(variant.attributes).join(" · ")} · 数量 {item.quantity}</small></div><strong>{money(variant.price * item.quantity)}</strong></div>; })}</section>
         <aside><h2>配送与金额</h2><div><span>收货信息</span><strong>{order.checkout.address.recipient} · {order.checkout.address.phone}</strong><small>{order.checkout.address.province} {order.checkout.address.city} {order.checkout.address.district} {order.checkout.address.detail}</small></div><div><span>商品小计</span><strong>{money(order.quote.subtotal)}</strong></div><div><span>优惠</span><strong>-{money(order.quote.discount)}</strong></div><div><span>配送</span><strong>{order.quote.shipping ? money(order.quote.shipping) : "免费"}</strong></div><div className="summary-total"><span>订单总额</span><strong>{money(order.quote.total)}</strong></div></aside>
       </div>
-      <div className="order-timeline"><span className="done"><i><Check /></i><strong>订单已创建</strong></span><em /><span className={order.status === "paid" ? "done" : ""}><i>{order.status === "paid" ? <Check /> : "2"}</i><strong>支付确认</strong></span><em /><span><i>3</i><strong>商品配送</strong></span><em /><span><i>4</i><strong>完成</strong></span></div>
+      <div className="order-timeline"><span className="done"><i><Check /></i><strong>订单已创建</strong></span><em /><span className={meta.step >= 1 ? "done" : ""}><i>{meta.step >= 1 ? <Check /> : "2"}</i><strong>支付确认</strong></span><em /><span className={meta.step >= 2 ? "done" : ""}><i>{meta.step >= 2 ? <Check /> : "3"}</i><strong>商品配送</strong></span><em /><span className={meta.step >= 3 ? "done" : ""}><i>{meta.step >= 3 ? <Check /> : "4"}</i><strong>完成</strong></span></div>
     </div>
   );
 }

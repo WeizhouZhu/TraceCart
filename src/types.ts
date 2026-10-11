@@ -108,14 +108,20 @@ export interface PaymentSession {
   errorCode?: string;
 }
 
+export type OrderStatus = "awaiting_payment" | "paid" | "shipped" | "completed" | "cancelled";
+
 export interface Order {
   id: string;
   token: string;
   items: CartItem[];
   quote: CartQuote;
   checkout: CheckoutDraft;
-  status: "awaiting_payment" | "paid" | "cancelled";
+  status: OrderStatus;
   createdAt: string;
+  statusUpdatedAt?: string;
+  paidAt?: string;
+  shippedAt?: string;
+  completedAt?: string;
   paymentId?: string;
 }
 

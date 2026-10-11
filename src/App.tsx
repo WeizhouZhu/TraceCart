@@ -21,6 +21,7 @@ import {
   PaymentResultPage,
   RedirectPaymentPage,
 } from "./pages/checkout";
+import { OrdersPage } from "./pages/orders";
 
 function RouteTelemetry() {
   const location = useLocation();
@@ -41,6 +42,7 @@ function StoreRoutes() {
         <Route path="/checkout" element={<CheckoutPage />} />
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/compare" element={<ComparePage />} />
+        <Route path="/orders" element={<OrdersPage />} />
         <Route path="/order/:orderToken" element={<OrderPage />} />
         <Route path="/service" element={<ServicePage />} />
         <Route path="/collector" element={<CollectorPage />} />

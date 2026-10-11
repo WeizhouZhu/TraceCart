@@ -15,6 +15,7 @@ import {
   readJson,
   writeJson,
 } from "./storage";
+import { advanceOrderLifecycle, confirmOrderReceipt, markOrderPaid } from "./order-lifecycle";
 
 interface StoredSession extends SessionInfo {
   startedAt: string;
@@ -355,7 +356,7 @@ app.post("/api/orders", async (request: TraceRequest, reply) => {
   const prior = body.idempotencyKey
     ? orders.find((order) => order.sessionId === session.sessionId && order.idempotencyKey === body.idempotencyKey)
     : undefined;
-  if (prior) return prior;
+  if (prior) return publicOrder(prior);
 
   const id = "TC" + Date.now().toString().slice(-10) + Math.floor(Math.random() * 90 + 10);
   const order: StoredOrder = {
@@ -366,6 +367,7 @@ app.post("/api/orders", async (request: TraceRequest, reply) => {
     checkout: body.checkout,
     status: "awaiting_payment",
     createdAt: now(),
+    statusUpdatedAt: now(),
     sessionId: session.sessionId,
     idempotencyKey: body.idempotencyKey || randomUUID(),
   };
@@ -374,11 +376,38 @@ app.post("/api/orders", async (request: TraceRequest, reply) => {
   return reply.code(201).send(publicOrder(order));
 });
 
+app.get("/api/orders", async (request: TraceRequest, reply) => {
+  const session = await ensureSession(request, reply);
+  const sessionOrders = orders.filter((item) => item.sessionId === session.sessionId);
+  const changed = sessionOrders.map((order) => advanceOrderLifecycle(order)).some(Boolean);
+  if (changed) await persistOrders();
+  return sessionOrders
+    .slice()
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .map(publicOrder);
+});
+
 app.get("/api/orders/:key", async (request: TraceRequest, reply) => {
   const session = await ensureSession(request, reply);
   const { key } = request.params as { key: string };
   const order = orders.find((item) => (item.id === key || item.token === key) && item.sessionId === session.sessionId);
   if (!order) return reply.code(404).send({ message: "订单不存在或不属于当前匿名会话" });
+  if (advanceOrderLifecycle(order)) await persistOrders();
+  return publicOrder(order);
+});
+
+app.post("/api/orders/:key/confirm-receipt", async (request: TraceRequest, reply) => {
+  const session = await ensureSession(request, reply);
+  const { key } = request.params as { key: string };
+  const order = orders.find((item) => (item.id === key || item.token === key) && item.sessionId === session.sessionId);
+  if (!order) return reply.code(404).send({ message: "订单不存在或不属于当前匿名会话" });
+  const advanced = advanceOrderLifecycle(order);
+  if (order.status === "completed") {
+    if (advanced) await persistOrders();
+    return publicOrder(order);
+  }
+  if (!confirmOrderReceipt(order)) return reply.code(409).send({ message: "订单发货后才能确认收货" });
+  await persistOrders();
   return publicOrder(order);
 });
 
@@ -420,7 +449,7 @@ app.post("/api/payments", async (request: TraceRequest, reply) => {
     sessionId: session.sessionId,
   };
   if (method === "cod") {
-    order.status = "paid";
+    markOrderPaid(order);
     order.paymentId = payment.id;
     await persistOrders();
   }
@@ -455,7 +484,7 @@ app.post("/api/payments/:paymentId/confirm", async (request: TraceRequest, reply
     payment.status = "succeeded";
     const order = orders.find((item) => item.id === payment.orderId);
     if (order) {
-      order.status = "paid";
+      markOrderPaid(order);
       order.paymentId = payment.id;
       await persistOrders();
     }

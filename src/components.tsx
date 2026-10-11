@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import {
   ArrowRight,
   ChevronDown,
+  ClipboardList,
   GitCompareArrows,
   Heart,
   Menu,
@@ -86,6 +87,7 @@ function Header() {
           <span className="service-strip__notice">正品保障 · 满 99 元免运费</span>
           <nav aria-label="辅助导航">
             <Link to="/service">帮助中心</Link>
+            <Link to="/orders">我的订单</Link>
             <Link to="/favorites">我的收藏</Link>
             <Link to="/cart">购物车</Link>
           </nav>
@@ -220,6 +222,10 @@ function Header() {
           </div>
 
           <div className="header-actions">
+            <Link to="/orders" className="header-action" data-track-id="header-orders">
+              <span className="icon-wrap"><ClipboardList size={20} /></span>
+              <small>订单</small>
+            </Link>
             <Link to="/favorites" className="header-action" data-track-id="header-favorites">
               <span className="icon-wrap"><Heart size={20} /><em>{favorites.length}</em></span>
               <small>收藏</small>
@@ -511,13 +517,12 @@ function Footer() {
           </Link>
           <p>发现兼具设计、品质与实用价值的日常好物，让每一次选购都更简单从容。</p>
         </div>
-        <div><strong>购物指南</strong><Link to="/search">全部商品</Link><Link to="/cart">购物车</Link><Link to="/service">配送说明</Link></div>
-        <div><strong>客户服务</strong><Link to="/service">退换货政策</Link><Link to="/service">支付与配送</Link><Link to="/favorites">我的收藏</Link></div>
+        <div><strong>购物指南</strong><Link to="/search">全部商品</Link><Link to="/cart">购物车</Link><Link to="/orders">我的订单</Link></div>
+        <div><strong>客户服务</strong><Link to="/service">售后与配送</Link><Link to="/favorites">我的收藏</Link></div>
         <div><strong>联系我们</strong><span>客服时间 9:00–21:00</span><span>配送覆盖全国主要城市</span><span>在线客服全天候响应</span></div>
       </div>
       <div className="container footer-bottom">
         <span>© 2026 TraceCart</span>
-        <span>隐私政策 · 用户协议 · 消费者权益</span>
       </div>
     </footer>
   );

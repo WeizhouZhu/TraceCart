@@ -38,7 +38,15 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  listOrders: () => request<Order[]>("/api/orders"),
+
   getOrder: (token: string) => request<Order>(`/api/orders/${encodeURIComponent(token)}`),
+
+  confirmReceipt: (token: string) =>
+    request<Order>(`/api/orders/${encodeURIComponent(token)}/confirm-receipt`, {
+      method: "POST",
+      body: "{}",
+    }),
 
   createPayment: (orderId: string, method: PaymentMethod) =>
     request<PaymentSession>("/api/payments", {

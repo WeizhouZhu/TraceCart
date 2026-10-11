@@ -29,6 +29,7 @@ import { brands, categories, getProductById, getProductBySlug, getVariant, produ
 import { money, searchCatalog, type SortMode } from "../lib/catalog";
 import { trackBusiness } from "../lib/telemetry";
 import { useStore } from "../store/AppStore";
+import { HomeOrdersSection } from "./orders";
 
 function useTitle(title: string) {
   useEffect(() => {
@@ -85,6 +86,8 @@ export function HomePage() {
           <span><PackageCheck size={21} /><strong>品质保障</strong><small>严格选品与库存管理</small></span>
         </div>
       </section>
+
+      <HomeOrdersSection />
 
       <section className="page-section container">
         <SectionHeader
