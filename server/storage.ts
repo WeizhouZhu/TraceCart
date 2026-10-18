@@ -28,6 +28,14 @@ export async function appendNdjson(name: string, value: unknown) {
   await appendFile(path.join(DATA_DIR, name), JSON.stringify(value) + "\n", "utf8");
 }
 
+export async function replaceNdjson(name: string, values: unknown[]) {
+  const target = path.join(DATA_DIR, name);
+  const temporary = target + ".tmp";
+  const content = values.length ? values.map((value) => JSON.stringify(value)).join("\n") + "\n" : "";
+  await writeFile(temporary, content, "utf8");
+  await rename(temporary, target);
+}
+
 export async function readNdjson<T>(name: string): Promise<T[]> {
   try {
     const content = await readFile(path.join(DATA_DIR, name), "utf8");

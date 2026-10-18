@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
@@ -43,6 +43,11 @@ interface AccessLink {
 interface ApiKeyRecord { id: string; label: "script" | "ai"; digest: string; createdAt: string; revokedAt?: string }
 interface RequestRow { label: ActorLabel | null; serverReceivedAt: string }
 interface TrajectoryRow { label: ActorLabel | null; serverReceivedAt: string }
+interface PendingSession {
+  session: StoredSession;
+  requests: Array<Record<string, unknown>>;
+  lastSeenAt: number;
+}
 
 await ensureDataDirectories();
 let sessions = await readJson<StoredSession[]>("sessions.json", []);
@@ -58,6 +63,10 @@ const configuredOrigin = process.env.PUBLIC_ORIGIN?.replace(/\/$/, "");
 const failureLimiter = new FailureLimiter();
 const quotaLimiter = new WindowLimiter();
 const adminSessions = new Map<string, number>();
+const pendingUnlabeledSessions = new Map<string, PendingSession>();
+const PENDING_SESSION_TTL_MS = 5 * 60_000;
+const MAX_PENDING_SESSIONS = 5_000;
+const MAX_PENDING_REQUESTS = 100;
 
 const app = Fastify({
   logger: {
@@ -133,10 +142,38 @@ function commerceApi(pathname: string) {
 function collectableRequest(pathname: string) {
   return commercePage(pathname) || commerceApi(pathname) || pathname === "/api/telemetry/batches";
 }
+function cleanupPendingUnlabeledSessions(current = Date.now()) {
+  for (const [sessionId, pending] of pendingUnlabeledSessions) {
+    if (current - pending.lastSeenAt >= PENDING_SESSION_TTL_MS) pendingUnlabeledSessions.delete(sessionId);
+  }
+  while (pendingUnlabeledSessions.size >= MAX_PENDING_SESSIONS) {
+    const oldest = pendingUnlabeledSessions.keys().next().value as string | undefined;
+    if (!oldest) break;
+    pendingUnlabeledSessions.delete(oldest);
+  }
+}
+
+function findCommerceSession(sessionId: string | undefined) {
+  if (!sessionId) return undefined;
+  return sessions.find((item) => item.sessionId === sessionId)
+    ?? pendingUnlabeledSessions.get(sessionId)?.session;
+}
+
+async function promotePendingSession(session: StoredSession) {
+  const pending = pendingUnlabeledSessions.get(session.sessionId);
+  if (!pending) return false;
+  sessions.push(session);
+  for (const row of pending.requests) await appendNdjson("requests.ndjson", row);
+  await persistSessions();
+  pendingUnlabeledSessions.delete(session.sessionId);
+  return true;
+}
+
 async function ensureCommerceSession(request: TraceRequest, reply: FastifyReply) {
+  cleanupPendingUnlabeledSessions();
   const rawCookie = request.cookies.tc_session;
   const signedId = readSignedCookie(request, "tc_session");
-  let session = signedId ? sessions.find((item) => item.sessionId === signedId) : undefined;
+  let session = findCommerceSession(signedId);
   if (!session && rawCookie && /^[0-9a-f-]{36}$/i.test(rawCookie)) {
     const legacy = sessions.find((item) => item.sessionId === rawCookie && item.label === null);
     if (legacy) {
@@ -160,11 +197,12 @@ async function ensureCommerceSession(request: TraceRequest, reply: FastifyReply)
       requestCount: 0,
       trajectoryCount: 0,
     };
-    sessions.push(session);
+    pendingUnlabeledSessions.set(session.sessionId, { session, requests: [], lastSeenAt: Date.now() });
     reply.setCookie("tc_session", session.sessionId, sessionCookieOptions());
-    await persistSessions();
   }
   session.endedAt = now();
+  const pending = pendingUnlabeledSessions.get(session.sessionId);
+  if (pending) pending.lastSeenAt = Date.now();
   request.traceSessionId = session.sessionId;
   return session;
 }
@@ -179,14 +217,13 @@ app.addHook("onRequest", async (request: TraceRequest, reply) => {
 app.addHook("onResponse", async (request: TraceRequest, reply) => {
   const pathname = requestPath(request);
   if (!request.traceSessionId || !collectableRequest(pathname)) return;
-  const session = sessions.find((item) => item.sessionId === request.traceSessionId);
+  const session = findCommerceSession(request.traceSessionId);
   if (!session) return;
   const end = process.hrtime.bigint();
   const durationMs = request.traceStart ? Number(end - request.traceStart) / 1_000_000 : 0;
   session.requestCount += 1;
   session.endedAt = now();
-  if (session.requestCount % 10 === 0) await persistSessions();
-  await appendNdjson("requests.ndjson", {
+  const row = {
     requestId: request.id, sessionId: session.sessionId, label: session.label, serverReceivedAt: now(),
     method: request.method, path: pathname, statusCode: reply.statusCode,
     durationMs: Number(durationMs.toFixed(3)), responseBytes: Number(reply.getHeader("content-length") ?? 0),
@@ -194,7 +231,16 @@ app.addHook("onResponse", async (request: TraceRequest, reply) => {
     secChUa: String(request.headers["sec-ch-ua"] ?? ""), secChUaPlatform: String(request.headers["sec-ch-ua-platform"] ?? ""),
     acceptLanguage: String(request.headers["accept-language"] ?? ""), referer: String(request.headers.referer ?? ""),
     origin: String(request.headers.origin ?? ""),
-  });
+  };
+  const pending = pendingUnlabeledSessions.get(session.sessionId);
+  if (pending) {
+    pending.lastSeenAt = Date.now();
+    if (pending.requests.length < MAX_PENDING_REQUESTS) pending.requests.push(row);
+    else pendingUnlabeledSessions.delete(session.sessionId);
+    return;
+  }
+  if (session.requestCount % 10 === 0) await persistSessions();
+  await appendNdjson("requests.ndjson", row);
 });
 
 function numberOrNull(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : null }
@@ -340,20 +386,28 @@ app.post("/api/admin/keys/:label/rotate", { preHandler: requireAdmin }, async (r
 });
 app.post("/api/admin/export", { preHandler: requireAdmin }, async () => {
   const result = await createParquetExport(sessions);
-  return { files: result.files.map((file) => ({
-    ...file, url: "/api/admin/files/" + encodeURIComponent(result.batch) + "/" + encodeURIComponent(file.name),
-  })) };
+  return {
+    archive: {
+      ...result.archive,
+      url: "/api/admin/files/" + encodeURIComponent(result.batch) + "/" + encodeURIComponent(result.archive.name),
+    },
+    files: result.files,
+  };
 });
 app.get("/api/admin/files/:batch/:file", { preHandler: requireAdmin }, async (request, reply) => {
   const { batch, file } = request.params as { batch: string; file: string };
-  if (!/^[0-9TZ-]+$/.test(batch) || !["sessions.parquet", "requests.parquet", "trajectories.parquet"].includes(file)) {
+  const expectedFile = `tracecart-export-${batch}.zip`;
+  if (!/^[0-9TZ-]+$/.test(batch) || file !== expectedFile) {
     return reply.code(400).send({ message: "文件路径无效" });
   }
-  const target = path.join(EXPORT_DIR, batch, file);
+  const directory = path.join(EXPORT_DIR, batch);
+  const target = path.join(directory, file);
   try { await stat(target) } catch { return reply.code(404).send({ message: "导出文件不存在" }) }
-  reply.header("Content-Type", "application/octet-stream");
+  const stream = createReadStream(target);
+  stream.on("close", () => { void rm(directory, { recursive: true, force: true }); });
+  reply.header("Content-Type", "application/zip");
   reply.header("Content-Disposition", `attachment; filename="${file}"`);
-  return reply.send(createReadStream(target));
+  return reply.send(stream);
 });
 function rejectApiKey(request: FastifyRequest, reply: FastifyReply) {
   const limitKey = `api:${request.ip}`;
@@ -464,6 +518,7 @@ app.post("/api/telemetry/batches", async (request: TraceRequest, reply) => {
   }
   session.trajectoryCount += events.length;
   session.endedAt = receivedAt;
+  await promotePendingSession(session);
   await persistSessions();
   return { accepted: events.length };
 });

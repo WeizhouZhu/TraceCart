@@ -143,16 +143,17 @@ export function AdminPage() {
   async function createExport() {
     setBusy(true);
     try {
-      const result = await jsonRequest<{ files: Array<{ name: string; url: string; rows: number }> }>("/api/admin/export", {
-        method: "POST", body: "{}",
-      });
-      for (const file of result.files) {
-        const link = document.createElement("a");
-        link.href = file.url;
-        link.download = file.name;
-        link.click();
-      }
-      setMessage(`已生成并开始下载 ${result.files.length} 个 Parquet 文件。`);
+      const result = await jsonRequest<{
+        archive: { name: string; url: string; bytes: number };
+        files: Array<{ name: string; rows: number }>;
+      }>("/api/admin/export", { method: "POST", body: "{}" });
+      const link = document.createElement("a");
+      link.href = result.archive.url;
+      link.download = result.archive.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setMessage(`已生成并下载 ${result.archive.name}，包含3个Parquet文件。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "导出失败");
     } finally {
@@ -225,7 +226,7 @@ function DataPanel({ summary, busy, onExport }: { summary: Summary | null; busy:
       </div>
       <div className="ops-grid">
         <article className="ops-card">
-          <div className="ops-card-head"><div><p className="ops-kicker">LABEL DISTRIBUTION</p><h2>标签分布</h2></div><button className="ops-primary compact" onClick={onExport} disabled={busy}><Download />导出 Parquet</button></div>
+          <div className="ops-card-head"><div><p className="ops-kicker">LABEL DISTRIBUTION</p><h2>标签分布</h2></div><button className="ops-primary compact" onClick={onExport} disabled={busy}><Download />导出 ZIP</button></div>
           <div className="ops-label-bars">
             {(Object.entries(summary.labels) as Array<[keyof Summary["labels"], number]>).map(([label, count]) => (
               <div key={label}><span>{labelName(label)}</span><strong>{count.toLocaleString()}</strong><i><b style={{ width: `${summary.totals.sessions ? Math.max(2, count / summary.totals.sessions * 100) : 0}%` }} /></i></div>
@@ -235,7 +236,7 @@ function DataPanel({ summary, busy, onExport }: { summary: Summary | null; busy:
         </article>
         <article className="ops-card ops-export-info">
           <p className="ops-kicker">PYTHON READY</p><h2>训练数据导出</h2>
-          <p>一次生成 sessions、requests 和 trajectories 三个文件，可直接使用 pandas.read_parquet 加载。</p>
+          <p>一次生成包含 sessions、requests 和 trajectories 的ZIP，解压后可直接使用 pandas.read_parquet 加载。</p>
           <div><code>sessions.parquet</code><code>requests.parquet</code><code>trajectories.parquet</code></div>
         </article>
       </div>

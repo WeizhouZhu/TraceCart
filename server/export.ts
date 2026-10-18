@@ -1,5 +1,7 @@
+import { createWriteStream } from "node:fs";
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { ZipArchive } from "archiver";
 import parquet from "parquetjs-lite";
 import { EXPORT_DIR, readNdjson } from "./storage";
 
@@ -76,7 +78,41 @@ async function writeParquet(filePath: string, schemaDefinition: Record<string, u
   }
 }
 
+const EXPORT_RETENTION_MS = 60 * 60_000;
+
+async function cleanupStaleExports() {
+  const entries = await readdir(EXPORT_DIR, { withFileTypes: true });
+  const current = Date.now();
+  await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+    const directory = path.join(EXPORT_DIR, entry.name);
+    const information = await stat(directory);
+    if (current - information.mtimeMs >= EXPORT_RETENTION_MS) {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }));
+}
+
+async function createZipArchive(directory: string, batch: string, fileNames: string[]) {
+  const name = `tracecart-export-${batch}.zip`;
+  const target = path.join(directory, name);
+  const output = createWriteStream(target);
+  const archive = new ZipArchive({ zlib: { level: 9 } });
+  const completed = new Promise<void>((resolve, reject) => {
+    output.on("close", resolve);
+    output.on("error", reject);
+    archive.on("error", reject);
+  });
+  archive.pipe(output);
+  for (const fileName of fileNames) archive.file(path.join(directory, fileName), { name: fileName });
+  await archive.finalize();
+  await completed;
+  const information = await stat(target);
+  await Promise.all(fileNames.map((fileName) => rm(path.join(directory, fileName), { force: true })));
+  return { name, bytes: information.size };
+}
+
 export async function createParquetExport(sessions: SessionRow[]) {
+  await cleanupStaleExports();
   const batch = new Date().toISOString().replace(/[:.]/g, "-");
   const directory = path.join(EXPORT_DIR, batch);
   await mkdir(directory, { recursive: true });
@@ -204,12 +240,12 @@ export async function createParquetExport(sessions: SessionRow[]) {
     payload_json: { type: "UTF8" },
   }, trajectoryRows);
 
-  return {
-    batch,
-    files: [
-      { name: "sessions.parquet", rows: sessionRows.length },
-      { name: "requests.parquet", rows: requestRows.length },
-      { name: "trajectories.parquet", rows: trajectoryRows.length },
-    ],
-  };
+  const files = [
+    { name: "sessions.parquet", rows: sessionRows.length },
+    { name: "requests.parquet", rows: requestRows.length },
+    { name: "trajectories.parquet", rows: trajectoryRows.length },
+  ];
+  const archive = await createZipArchive(directory, batch, files.map((file) => file.name));
+
+  return { batch, archive, files };
 }
