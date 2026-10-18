@@ -457,7 +457,12 @@ main { min-height: 65vh; }
 .form-grid label.full { grid-column: 1/-1; }
 .form-grid label > span, .note-field > span { font-size: 11px; font-weight: 750; }
 .form-grid input, .form-grid select, .form-grid textarea, .note-field textarea { width: 100%; border: 1px solid #cbd5df; border-radius: 5px; padding: 11px 12px; outline: 0; background: white; }
+.form-grid select:disabled { background: #f2f4f7; color: #8a97a6; cursor: not-allowed; }
 .form-grid input:focus, .form-grid select:focus, .form-grid textarea:focus, .note-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,107,53,.1); }
+.form-grid .field-invalid input, .form-grid .field-invalid select, .form-grid .field-invalid textarea { border-color: var(--danger); background: #fffafa; }
+.form-grid .field-invalid input:focus, .form-grid .field-invalid select:focus, .form-grid .field-invalid textarea:focus { box-shadow: 0 0 0 3px rgba(207,49,49,.1); }
+.form-field-error { display: flex; align-items: center; gap: 5px; color: var(--danger); font-size: 11px; line-height: 1.4; }
+.checkout-address-error span { display: flex; flex-direction: column; gap: 2px; }
 .form-grid textarea { min-height: 80px; resize: vertical; }
 .step-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 35px; padding-top: 22px; border-top: 1px solid var(--line); }
 .delivery-options { display: grid; gap: 10px; }

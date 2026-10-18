@@ -22,7 +22,13 @@ import QRCode from "qrcode";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Breadcrumbs } from "../components";
 import { getProductById, getVariant } from "../data/catalog";
-import { isCheckoutAddressValid } from "../lib/checkout";
+import {
+  checkoutRegions,
+  getCheckoutAddressErrors,
+  getCitiesForProvince,
+  getDistrictsForCity,
+  type CheckoutAddressField,
+} from "../lib/checkout";
 import { api } from "../lib/api";
 import { money } from "../lib/catalog";
 import { createId } from "../lib/id";
@@ -53,11 +59,53 @@ export function CheckoutPage() {
   const [couponStatus, setCouponStatus] = useState<"idle" | "valid" | "invalid">("idle");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [addressSubmitted, setAddressSubmitted] = useState(false);
+  const [addressTouched, setAddressTouched] = useState<Partial<Record<CheckoutAddressField, boolean>>>({});
   const discount = cartSubtotal >= 50000 ? 4000 : couponStatus === "valid" ? 3000 : 0;
   const shipping = deliveryPrices[checkout.deliveryMethod];
   const total = Math.max(0, cartSubtotal - discount + shipping);
   const payableTotal = total + (checkout.giftWrap ? 1200 : 0);
-  const addressValid = isCheckoutAddressValid(checkout.address);
+  const addressErrors = useMemo(() => getCheckoutAddressErrors(checkout.address), [checkout.address]);
+  const addressValid = Object.keys(addressErrors).length === 0;
+  const cityOptions = getCitiesForProvince(checkout.address.province);
+  const districtOptions = getDistrictsForCity(checkout.address.province, checkout.address.city);
+
+  function updateAddress(field: CheckoutAddressField, value: string) {
+    const address = { ...checkout.address, [field]: value };
+    if (field === "province") {
+      address.city = "";
+      address.district = "";
+      setAddressTouched((current) => ({ ...current, province: true, city: false, district: false }));
+    } else if (field === "city") {
+      address.district = "";
+      setAddressTouched((current) => ({ ...current, city: true, district: false }));
+    }
+    updateCheckout({ address });
+  }
+
+  function touchAddress(field: CheckoutAddressField) {
+    setAddressTouched((current) => ({ ...current, [field]: true }));
+  }
+
+  function visibleAddressError(field: CheckoutAddressField) {
+    return addressSubmitted || addressTouched[field] ? addressErrors[field] : undefined;
+  }
+
+  function continueToDelivery() {
+    setAddressSubmitted(true);
+    if (!addressValid) {
+      const firstInvalid = Object.keys(addressErrors)[0] as CheckoutAddressField | undefined;
+      if (firstInvalid) {
+        window.requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(`[data-address-field="${firstInvalid}"]`)?.focus();
+        });
+      }
+      trackBusiness("checkout_address_invalid", { fields: Object.keys(addressErrors) });
+      return;
+    }
+    setStep(2);
+    trackBusiness("checkout_step", { step: 2 });
+  }
 
   function applyCoupon() {
     setCouponStatus(checkout.couponCode.toUpperCase() === "TRACE30" ? "valid" : "invalid");
@@ -114,16 +162,58 @@ export function CheckoutPage() {
             <div className="checkout-section">
               <div className="checkout-section__title"><div><span className="eyebrow">STEP 01</span><h2>配送信息</h2></div></div>
               <div className="notice notice--info"><ShieldCheck size={18} /><span><strong>隐私保护</strong>您的联系方式仅用于订单配送和必要的售后服务。</span></div>
+              {addressSubmitted && !addressValid && (
+                <div className="notice notice--error checkout-address-error" role="alert">
+                  <AlertCircle size={18} /><span><strong>配送信息尚未填写完整</strong>请检查下方标红字段后再继续。</span>
+                </div>
+              )}
               <div className="form-grid" data-track-mask>
-                <label><span>收货人 *</span><input value={checkout.address.recipient} onChange={(event) => updateCheckout({ address: { ...checkout.address, recipient: event.target.value } })} placeholder="请输入收货人姓名" /></label>
-                <label><span>手机号 *</span><input value={checkout.address.phone} onChange={(event) => updateCheckout({ address: { ...checkout.address, phone: event.target.value } })} placeholder="13800000000" /></label>
-                <label><span>省份 *</span><select value={checkout.address.province} onChange={(event) => updateCheckout({ address: { ...checkout.address, province: event.target.value } })}><option value="">请选择</option><option>广东省</option><option>浙江省</option><option>上海市</option><option>北京市</option></select></label>
-                <label><span>城市 *</span><select value={checkout.address.city} onChange={(event) => updateCheckout({ address: { ...checkout.address, city: event.target.value } })}><option value="">请选择</option><option>广州市</option><option>深圳市</option><option>杭州市</option><option>上海市</option><option>北京市</option></select></label>
-                <label><span>区县 *</span><select value={checkout.address.district} onChange={(event) => updateCheckout({ address: { ...checkout.address, district: event.target.value } })}><option value="">请选择</option><option>天河区</option><option>越秀区</option><option>南山区</option><option>西湖区</option><option>浦东新区</option></select></label>
-                <label><span>邮政编码</span><input value={checkout.address.postalCode} onChange={(event) => updateCheckout({ address: { ...checkout.address, postalCode: event.target.value } })} placeholder="510000" /></label>
-                <label className="full"><span>详细地址 *</span><textarea value={checkout.address.detail} onChange={(event) => updateCheckout({ address: { ...checkout.address, detail: event.target.value } })} placeholder="街道、楼栋、门牌号" /></label>
+                <label className={visibleAddressError("recipient") ? "field-invalid" : undefined}>
+                  <span>收货人 *</span>
+                  <input data-address-field="recipient" value={checkout.address.recipient} onChange={(event) => updateAddress("recipient", event.target.value)} onBlur={() => touchAddress("recipient")} placeholder="请输入收货人姓名" aria-invalid={Boolean(visibleAddressError("recipient"))} aria-describedby="recipient-error" />
+                  {visibleAddressError("recipient") && <small className="form-field-error" id="recipient-error"><AlertCircle size={13} />{visibleAddressError("recipient")}</small>}
+                </label>
+                <label className={visibleAddressError("phone") ? "field-invalid" : undefined}>
+                  <span>手机号 *</span>
+                  <input data-address-field="phone" type="tel" inputMode="numeric" maxLength={11} value={checkout.address.phone} onChange={(event) => updateAddress("phone", event.target.value)} onBlur={() => touchAddress("phone")} placeholder="13800000000" aria-invalid={Boolean(visibleAddressError("phone"))} aria-describedby="phone-error" />
+                  {visibleAddressError("phone") && <small className="form-field-error" id="phone-error"><AlertCircle size={13} />{visibleAddressError("phone")}</small>}
+                </label>
+                <label className={visibleAddressError("province") ? "field-invalid" : undefined}>
+                  <span>省份 *</span>
+                  <select data-address-field="province" value={checkout.address.province} onChange={(event) => updateAddress("province", event.target.value)} onBlur={() => touchAddress("province")} aria-invalid={Boolean(visibleAddressError("province"))} aria-describedby="province-error">
+                    <option value="">请选择省份</option>
+                    {checkoutRegions.map((region) => <option key={region.province} value={region.province}>{region.province}</option>)}
+                  </select>
+                  {visibleAddressError("province") && <small className="form-field-error" id="province-error"><AlertCircle size={13} />{visibleAddressError("province")}</small>}
+                </label>
+                <label className={visibleAddressError("city") ? "field-invalid" : undefined}>
+                  <span>城市 *</span>
+                  <select data-address-field="city" value={checkout.address.city} disabled={!checkout.address.province} onChange={(event) => updateAddress("city", event.target.value)} onBlur={() => touchAddress("city")} aria-invalid={Boolean(visibleAddressError("city"))} aria-describedby="city-error">
+                    <option value="">{checkout.address.province ? "请选择城市" : "请先选择省份"}</option>
+                    {cityOptions.map((city) => <option key={city} value={city}>{city}</option>)}
+                  </select>
+                  {visibleAddressError("city") && <small className="form-field-error" id="city-error"><AlertCircle size={13} />{visibleAddressError("city")}</small>}
+                </label>
+                <label className={visibleAddressError("district") ? "field-invalid" : undefined}>
+                  <span>区县 *</span>
+                  <select data-address-field="district" value={checkout.address.district} disabled={!checkout.address.city || !cityOptions.includes(checkout.address.city)} onChange={(event) => updateAddress("district", event.target.value)} onBlur={() => touchAddress("district")} aria-invalid={Boolean(visibleAddressError("district"))} aria-describedby="district-error">
+                    <option value="">{checkout.address.city ? "请选择区县" : "请先选择城市"}</option>
+                    {districtOptions.map((district) => <option key={district} value={district}>{district}</option>)}
+                  </select>
+                  {visibleAddressError("district") && <small className="form-field-error" id="district-error"><AlertCircle size={13} />{visibleAddressError("district")}</small>}
+                </label>
+                <label className={visibleAddressError("postalCode") ? "field-invalid" : undefined}>
+                  <span>邮政编码</span>
+                  <input data-address-field="postalCode" inputMode="numeric" maxLength={6} value={checkout.address.postalCode} onChange={(event) => updateAddress("postalCode", event.target.value)} onBlur={() => touchAddress("postalCode")} placeholder="510000" aria-invalid={Boolean(visibleAddressError("postalCode"))} aria-describedby="postal-code-error" />
+                  {visibleAddressError("postalCode") && <small className="form-field-error" id="postal-code-error"><AlertCircle size={13} />{visibleAddressError("postalCode")}</small>}
+                </label>
+                <label className={`full ${visibleAddressError("detail") ? "field-invalid" : ""}`}>
+                  <span>详细地址 *</span>
+                  <textarea data-address-field="detail" value={checkout.address.detail} onChange={(event) => updateAddress("detail", event.target.value)} onBlur={() => touchAddress("detail")} placeholder="街道、楼栋、门牌号" aria-invalid={Boolean(visibleAddressError("detail"))} aria-describedby="detail-error" />
+                  {visibleAddressError("detail") && <small className="form-field-error" id="detail-error"><AlertCircle size={13} />{visibleAddressError("detail")}</small>}
+                </label>
               </div>
-              <div className="step-actions"><Link className="button button--ghost" to="/cart"><ArrowLeft size={17} />返回购物车</Link><button className="button button--primary" disabled={!addressValid} onClick={() => { setStep(2); trackBusiness("checkout_step", { step: 2 }); }}>选择配送方式<ArrowRight size={17} /></button></div>
+              <div className="step-actions"><Link className="button button--ghost" to="/cart"><ArrowLeft size={17} />返回购物车</Link><button className="button button--primary" onClick={continueToDelivery}>选择配送方式<ArrowRight size={17} /></button></div>
             </div>
           )}
 
