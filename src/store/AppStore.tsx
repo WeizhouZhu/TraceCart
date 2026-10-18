@@ -68,7 +68,22 @@ function readState(): StoreState {
   try {
     const value = localStorage.getItem("tracecart.store");
     if (!value) return defaultState;
-    return { ...defaultState, ...JSON.parse(value) };
+    const stored = JSON.parse(value) as Partial<StoreState>;
+    const storedCheckout = stored.checkout;
+    const normalizedAddress = {
+      ...initialCheckout.address,
+      ...storedCheckout?.address,
+    } as CheckoutDraft["address"] & { postalCode?: unknown };
+    delete normalizedAddress.postalCode;
+    return {
+      ...defaultState,
+      ...stored,
+      checkout: {
+        ...initialCheckout,
+        ...storedCheckout,
+        address: normalizedAddress,
+      },
+    };
   } catch {
     return defaultState;
   }
