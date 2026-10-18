@@ -52,7 +52,6 @@ export function getCheckoutAddressErrors(address: CheckoutDraft["address"]): Che
   const recipient = address.recipient.trim();
   const phone = address.phone.trim();
   const detail = address.detail.trim();
-  const postalCode = address.postalCode?.trim() ?? "";
   const province = checkoutRegions.find((item) => item.province === address.province);
   const city = province?.cities.find((item) => item.name === address.city);
 
@@ -72,7 +71,6 @@ export function getCheckoutAddressErrors(address: CheckoutDraft["address"]): Che
   else if (!city || !(city.districts as readonly string[]).includes(address.district)) errors.district = "所选区县与城市不匹配，请重新选择";
 
   if (detail.length < 5) errors.detail = "详细地址至少需要 5 个字符";
-  if (postalCode && !/^\d{6}$/.test(postalCode)) errors.postalCode = "邮政编码应为 6 位数字";
 
   return errors;
 }

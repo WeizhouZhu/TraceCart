@@ -13,7 +13,6 @@ const completeAddress = {
   city: "广州市",
   district: "天河区",
   detail: "体育西路 88 号",
-  postalCode: "510000",
 };
 
 describe("isCheckoutAddressValid", () => {
@@ -48,9 +47,5 @@ describe("isCheckoutAddressValid", () => {
     expect(getCitiesForProvince("广东省")).not.toContain("杭州市");
     expect(getDistrictsForCity("广东省", "深圳市")).toContain("南山区");
     expect(getDistrictsForCity("广东省", "广州市")).not.toContain("南山区");
-  });
-
-  it("validates an optional postal code when it is present", () => {
-    expect(getCheckoutAddressErrors({ ...completeAddress, postalCode: "51000" }).postalCode).toBeTruthy();
   });
 });

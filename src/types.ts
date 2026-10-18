@@ -74,7 +74,6 @@ export interface Address {
   city: string;
   district: string;
   detail: string;
-  postalCode?: string;
 }
 
 export interface CheckoutDraft {

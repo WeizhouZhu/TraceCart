@@ -38,7 +38,6 @@ const initialCheckout: CheckoutDraft = {
     city: "",
     district: "",
     detail: "",
-    postalCode: "",
   },
   deliveryMethod: "standard",
   couponCode: "",

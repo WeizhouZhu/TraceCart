@@ -202,11 +202,6 @@ export function CheckoutPage() {
                   </select>
                   {visibleAddressError("district") && <small className="form-field-error" id="district-error"><AlertCircle size={13} />{visibleAddressError("district")}</small>}
                 </label>
-                <label className={visibleAddressError("postalCode") ? "field-invalid" : undefined}>
-                  <span>邮政编码</span>
-                  <input data-address-field="postalCode" inputMode="numeric" maxLength={6} value={checkout.address.postalCode} onChange={(event) => updateAddress("postalCode", event.target.value)} onBlur={() => touchAddress("postalCode")} placeholder="510000" aria-invalid={Boolean(visibleAddressError("postalCode"))} aria-describedby="postal-code-error" />
-                  {visibleAddressError("postalCode") && <small className="form-field-error" id="postal-code-error"><AlertCircle size={13} />{visibleAddressError("postalCode")}</small>}
-                </label>
                 <label className={`full ${visibleAddressError("detail") ? "field-invalid" : ""}`}>
                   <span>详细地址 *</span>
                   <textarea data-address-field="detail" value={checkout.address.detail} onChange={(event) => updateAddress("detail", event.target.value)} onBlur={() => touchAddress("detail")} placeholder="街道、楼栋、门牌号" aria-invalid={Boolean(visibleAddressError("detail"))} aria-describedby="detail-error" />
