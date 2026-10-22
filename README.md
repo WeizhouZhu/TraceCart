@@ -74,7 +74,18 @@ curl https://42.193.237.190/api/collect \
   -H "Authorization: Bearer <API_KEY>"
 ~~~
 
-所有专属链接只可使用一次、30 分钟有效，标签由服务端根据鉴权凭据写入且不可修改。Token 和 API Key 只保存摘要。
+大类型 human / script / ai 是稳定枚举，由服务端根据鉴权凭据写入且不可修改。子类型通过可配置的 sourceSubtype 注册表管理，可在管理端新增、改显示名、启用或停用；子类型稳定 ID 与大类型不可原地修改，避免历史数据语义漂移。
+
+新客户端创建链接时应提交结构化实验元数据：
+
+~~~bash
+curl -X POST https://42.193.237.190/api/collect \
+  -H "Authorization: Bearer <API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"sourceSubtype":"ai.browser_use","taskType":"purchase_exact_product","scenarioId":"purchase_exact_product_v1","experimentId":"pilot-2026q4","runnerVersion":"git-abc123","metadataSchemaVersion":1}'
+~~~
+
+旧客户端仍可使用，自动归入对应的 *.legacy_unspecified 子类型。元数据随一次性链接固化到 Session，并仅在 sessions.parquet 中导出；requests 与 trajectories 继续通过 session_id 关联。所有专属链接只可使用一次、30 分钟有效，Token 和 API Key 只保存摘要。
 
 管理页、人工验证、令牌领取、接入 API、健康检查、静态资源和 Nginx 日志均不进入训练数据。只有商城页面、商城业务 API 和已启用采集的会话可以写入 sessions、requests 与 trajectories。
 
@@ -87,6 +98,7 @@ data/
 ├── sessions.json
 ├── access-links.json
 ├── api-keys.json
+├── source-subtypes.json
 ├── orders.json
 ├── payments.json
 ├── requests.ndjson

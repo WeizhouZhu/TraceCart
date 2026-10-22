@@ -142,6 +142,12 @@ export interface SessionInfo {
   sessionId: string;
   label: ActorLabel | null;
   collectionTaskId: string | null;
+  sourceSubtype?: string | null;
+  taskType?: string | null;
+  scenarioId?: string | null;
+  experimentId?: string | null;
+  runnerVersion?: string | null;
+  metadataSchemaVersion?: number | null;
 }
 
 export interface ScenarioSettings {

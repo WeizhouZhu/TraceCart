@@ -19,6 +19,12 @@ interface SessionRow {
   participantId?: string | null;
   nickname?: string | null;
   captureMode?: "unlabeled" | "labeled";
+  sourceSubtype?: string | null;
+  taskType?: string | null;
+  scenarioId?: string | null;
+  experimentId?: string | null;
+  runnerVersion?: string | null;
+  metadataSchemaVersion?: number | null;
 }
 
 interface RequestRow {
@@ -134,6 +140,12 @@ export async function createParquetExport(sessions: SessionRow[]) {
     participant_id: session.participantId ?? undefined,
     nickname: session.nickname ?? undefined,
     capture_mode: session.captureMode ?? (session.label ? "labeled" : "unlabeled"),
+    source_subtype: session.sourceSubtype ?? undefined,
+    task_type: session.taskType ?? undefined,
+    scenario_id: session.scenarioId ?? undefined,
+    experiment_id: session.experimentId ?? undefined,
+    runner_version: session.runnerVersion ?? undefined,
+    metadata_schema_version: session.metadataSchemaVersion ?? undefined,
   }));
 
   const requestRows = requests.map((row) => ({
@@ -194,6 +206,12 @@ export async function createParquetExport(sessions: SessionRow[]) {
     participant_id: optionalString,
     nickname: optionalString,
     capture_mode: { type: "UTF8" },
+    source_subtype: optionalString,
+    task_type: optionalString,
+    scenario_id: optionalString,
+    experiment_id: optionalString,
+    runner_version: optionalString,
+    metadata_schema_version: { type: "INT32", optional: true },
   }, sessionRows);
 
   await writeParquet(path.join(directory, "requests.parquet"), {

@@ -11,6 +11,14 @@ import { createParquetExport } from "./export";
 import { DATA_DIR, EXPORT_DIR, appendNdjson, ensureDataDirectories, readJson, readNdjson, writeJson } from "./storage";
 import { advanceOrderLifecycle, confirmOrderReceipt, markOrderPaid } from "./order-lifecycle";
 import { FailureLimiter, WindowLimiter, safeDigestEqual, sanitizeNickname, secretDigest } from "./security";
+import {
+  normalizeDisplayName,
+  normalizeIdentifier,
+  resolveSourceSubtype,
+  seedSourceSubtypes,
+  validateSubtypeIdentity,
+  type SourceSubtypeDefinition,
+} from "./collection-metadata";
 
 interface StoredSession extends SessionInfo {
   startedAt: string;
@@ -36,11 +44,24 @@ interface AccessLink {
   participantId?: string;
   issuedByKeyId?: string;
   note?: string;
+  sourceSubtype?: string;
+  taskType?: string;
+  scenarioId?: string;
+  experimentId?: string;
+  runnerVersion?: string;
+  metadataSchemaVersion?: number;
   createdAt: string;
   expiresAt: string;
   usedAt?: string;
 }
-interface ApiKeyRecord { id: string; label: "script" | "ai"; digest: string; createdAt: string; revokedAt?: string }
+interface ApiKeyRecord {
+  id: string;
+  label: "script" | "ai";
+  digest: string;
+  createdAt: string;
+  revokedAt?: string;
+  allowedSourceSubtypes?: string[];
+}
 interface RequestRow { label: ActorLabel | null; serverReceivedAt: string }
 interface TrajectoryRow { label: ActorLabel | null; serverReceivedAt: string }
 interface PendingSession {
@@ -55,6 +76,7 @@ let orders = await readJson<StoredOrder[]>("orders.json", []);
 let payments = await readJson<StoredPayment[]>("payments.json", []);
 let accessLinks = await readJson<AccessLink[]>("access-links.json", []);
 let apiKeys = await readJson<ApiKeyRecord[]>("api-keys.json", []);
+let sourceSubtypes = await readJson<SourceSubtypeDefinition[]>("source-subtypes.json", []);
 
 const cookieSecret = process.env.COOKIE_SECRET ?? "tracecart-development-cookie-secret-change-me";
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH ?? "";
@@ -106,6 +128,7 @@ function adminCookieOptions() {
 async function persistSessions() { await writeJson("sessions.json", sessions) }
 async function persistAccessLinks() { await writeJson("access-links.json", accessLinks) }
 async function persistApiKeys() { await writeJson("api-keys.json", apiKeys) }
+async function persistSourceSubtypes() { await writeJson("source-subtypes.json", sourceSubtypes) }
 async function persistOrders() { await writeJson("orders.json", orders) }
 async function persistPayments() { await writeJson("payments.json", payments) }
 
@@ -124,6 +147,32 @@ async function seedApiKeys() {
   if (apiKeys.length) await persistApiKeys();
 }
 await seedApiKeys();
+
+async function seedCollectionMetadata() {
+  const seeded = seedSourceSubtypes(sourceSubtypes, now());
+  sourceSubtypes = seeded.sourceSubtypes;
+  let linksChanged = false;
+  let sessionsChanged = false;
+  for (const link of accessLinks) {
+    if (!link.sourceSubtype) { link.sourceSubtype = `${link.label}.legacy_unspecified`; linksChanged = true }
+    if (!link.taskType) { link.taskType = "unspecified"; linksChanged = true }
+    if (!link.scenarioId) { link.scenarioId = "unspecified"; linksChanged = true }
+    if (!link.metadataSchemaVersion) { link.metadataSchemaVersion = 1; linksChanged = true }
+  }
+  for (const session of sessions) {
+    if (session.label && !session.sourceSubtype) { session.sourceSubtype = `${session.label}.legacy_unspecified`; sessionsChanged = true }
+    if (session.label && !session.taskType) { session.taskType = "unspecified"; sessionsChanged = true }
+    if (session.label && !session.scenarioId) { session.scenarioId = "unspecified"; sessionsChanged = true }
+    if (session.label && !session.metadataSchemaVersion) { session.metadataSchemaVersion = 1; sessionsChanged = true }
+  }
+  await Promise.all([
+    seeded.changed ? persistSourceSubtypes() : Promise.resolve(),
+    linksChanged ? persistAccessLinks() : Promise.resolve(),
+    sessionsChanged ? persistSessions() : Promise.resolve(),
+  ]);
+}
+await seedCollectionMetadata();
+
 function readSignedCookie(request: FastifyRequest, name: string) {
   const value = request.cookies[name];
   if (!value) return undefined;
@@ -283,18 +332,28 @@ function linkStatus(link: AccessLink) {
 }
 async function issueLink(
   request: FastifyRequest,
-  data: Pick<AccessLink, "label" | "nickname" | "participantId" | "issuedByKeyId" | "note">,
+  data: Pick<AccessLink,
+    "label" | "nickname" | "participantId" | "issuedByKeyId" | "note" |
+    "sourceSubtype" | "taskType" | "scenarioId" | "experimentId" | "runnerVersion" | "metadataSchemaVersion"
+  >,
 ) {
   const token = randomBytes(32).toString("base64url");
   const createdAt = new Date();
   const record: AccessLink = {
     id: randomUUID(), tokenDigest: secretDigest(token, cookieSecret), label: data.label,
     nickname: data.nickname, participantId: data.participantId, issuedByKeyId: data.issuedByKeyId, note: data.note,
+    sourceSubtype: data.sourceSubtype, taskType: data.taskType, scenarioId: data.scenarioId,
+    experimentId: data.experimentId, runnerVersion: data.runnerVersion,
+    metadataSchemaVersion: data.metadataSchemaVersion,
     createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + 30 * 60_000).toISOString(),
   };
   accessLinks.push(record);
   await persistAccessLinks();
-  return { id: record.id, label: record.label, expiresAt: record.expiresAt, url: `${publicOrigin(request)}/c#${token}` };
+  return {
+    id: record.id, label: record.label, sourceSubtype: record.sourceSubtype,
+    taskType: record.taskType, scenarioId: record.scenarioId,
+    expiresAt: record.expiresAt, url: `${publicOrigin(request)}/c#${token}`,
+  };
 }
 function apiGuide(label: "script" | "ai", request: FastifyRequest) {
   return {
@@ -305,7 +364,20 @@ function apiGuide(label: "script" | "ai", request: FastifyRequest) {
       claim: { method: "POST", url: `${publicOrigin(request)}/api/claim` },
     },
     authorization: "Authorization: Bearer <API_KEY>",
-    createLinkBody: { optionalFields: ["note"], forbiddenFields: ["label"] },
+    createLinkBody: {
+      fields: {
+        sourceSubtype: "registered subtype; omitted clients use *.legacy_unspecified",
+        taskType: "lowercase task identifier",
+        scenarioId: "lowercase scenario identifier",
+        experimentId: "optional lowercase experiment identifier",
+        runnerVersion: "optional runner release or git revision",
+        metadataSchemaVersion: "optional positive integer; defaults to 1",
+        note: "optional human-readable note",
+      },
+      forbiddenFields: ["label"],
+    },
+    availableSourceSubtypes: sourceSubtypes.filter((item) => item.label === label && item.enabled)
+      .map(({ id, displayName }) => ({ id, displayName })),
     linkPolicy: { singleUse: true, expiresInMinutes: 30, labelDeterminedByApiKey: true },
     browserFlow: ["POST /api/collect with this API key.", "Open the returned url.", "The /c page claims and redirects to /."],
     httpClientFlow: [
@@ -348,7 +420,15 @@ app.get("/api/admin/summary", { preHandler: requireAdmin }, async () => {
     readNdjson<RequestRow>("requests.ndjson"), readNdjson<TrajectoryRow>("trajectories.ndjson"),
   ]);
   const labels = { unlabeled: 0, human: 0, script: 0, ai: 0 };
-  for (const session of sessions) labels[session.label ?? "unlabeled"] += 1;
+  const subtypes: Record<string, number> = {};
+  const taskTypes: Record<string, number> = {};
+  for (const session of sessions) {
+    labels[session.label ?? "unlabeled"] += 1;
+    const subtype = session.sourceSubtype ?? (session.label ? `${session.label}.legacy_unspecified` : "unlabeled");
+    subtypes[subtype] = (subtypes[subtype] ?? 0) + 1;
+    const taskType = session.taskType ?? "unspecified";
+    taskTypes[taskType] = (taskTypes[taskType] ?? 0) + 1;
+  }
   const dates = sessions.flatMap((session) => [session.startedAt, session.endedAt]).filter(Boolean).sort();
   return {
     generatedAt: now(),
@@ -356,10 +436,11 @@ app.get("/api/admin/summary", { preHandler: requireAdmin }, async () => {
       sessions: sessions.length, requests: requests.length, trajectories: trajectories.length,
       labeledSessions: sessions.length - labels.unlabeled, unlabeledSessions: labels.unlabeled,
     },
-    labels, timeRange: { first: dates[0] ?? null, last: dates.at(-1) ?? null },
+    labels, subtypes, taskTypes, timeRange: { first: dates[0] ?? null, last: dates.at(-1) ?? null },
     recentSessions: sessions.slice().sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 50).map((session) => ({
-      sessionId: session.sessionId, label: session.label, nickname: session.nickname ?? null,
-      startedAt: session.startedAt, endedAt: session.endedAt,
+      sessionId: session.sessionId, label: session.label, sourceSubtype: session.sourceSubtype ?? null,
+      taskType: session.taskType ?? null, scenarioId: session.scenarioId ?? null, experimentId: session.experimentId ?? null,
+      nickname: session.nickname ?? null, startedAt: session.startedAt, endedAt: session.endedAt,
       requestCount: session.requestCount, trajectoryCount: session.trajectoryCount,
     })),
   };
@@ -368,8 +449,51 @@ app.get("/api/admin/access", { preHandler: requireAdmin }, async (request) => ({
   keys: apiKeys.map(({ digest: _digest, ...key }) => ({ ...key, status: key.revokedAt ? "revoked" : "active" })),
   links: accessLinks.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 100)
     .map((link) => { const { tokenDigest: _tokenDigest, ...visible } = link; return { ...visible, status: linkStatus(link) } }),
+  sourceSubtypes: sourceSubtypes.slice().sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id)),
   guide: { script: apiGuide("script", request), ai: apiGuide("ai", request) },
 }));
+app.post("/api/admin/source-subtypes", { preHandler: requireAdmin }, async (request, reply) => {
+  const body = (request.body ?? {}) as Record<string, unknown>;
+  const identity = validateSubtypeIdentity(body.id, body.label);
+  if (!identity.ok) return reply.code(400).send({ message: identity.message });
+  const displayName = normalizeDisplayName(body.displayName);
+  if (!displayName) return reply.code(400).send({ message: "显示名称不能为空且最多 80 个字符" });
+  if (sourceSubtypes.some((item) => item.id === identity.id)) {
+    return reply.code(409).send({ message: "sourceSubtype 已存在；可修改显示名或启停状态" });
+  }
+  const timestamp = now();
+  const definition: SourceSubtypeDefinition = {
+    id: identity.id, label: identity.label, displayName, enabled: true,
+    createdAt: timestamp, updatedAt: timestamp,
+  };
+  sourceSubtypes.push(definition);
+  await persistSourceSubtypes();
+  return reply.code(201).send(definition);
+});
+app.patch("/api/admin/source-subtypes/:id", { preHandler: requireAdmin }, async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const definition = sourceSubtypes.find((item) => item.id === id);
+  if (!definition) return reply.code(404).send({ message: "sourceSubtype 不存在" });
+  const body = (request.body ?? {}) as Record<string, unknown>;
+  if ("label" in body || "id" in body) {
+    return reply.code(400).send({ message: "子类型 ID 和大类型不可修改；请新增子类型并停用旧项" });
+  }
+  if ("displayName" in body) {
+    const displayName = normalizeDisplayName(body.displayName);
+    if (!displayName) return reply.code(400).send({ message: "显示名称不能为空且最多 80 个字符" });
+    definition.displayName = displayName;
+  }
+  if ("enabled" in body) {
+    if (typeof body.enabled !== "boolean") return reply.code(400).send({ message: "enabled 必须是布尔值" });
+    if (definition.id.endsWith(".legacy_unspecified") && body.enabled === false) {
+      return reply.code(400).send({ message: "兼容旧客户端的 legacy_unspecified 子类型不能停用" });
+    }
+    definition.enabled = body.enabled;
+  }
+  definition.updatedAt = now();
+  await persistSourceSubtypes();
+  return definition;
+});
 app.post("/api/admin/keys/:label/rotate", { preHandler: requireAdmin }, async (request, reply) => {
   const { label } = request.params as { label: string };
   if (label !== "script" && label !== "ai") return reply.code(400).send({ message: "密钥类型无效" });
@@ -429,6 +553,22 @@ app.post("/api/collect", async (request, reply) => {
   failureLimiter.success(`api:${request.ip}`);
   const body = (request.body ?? {}) as Record<string, unknown>;
   if ("label" in body) return reply.code(400).send({ message: "label 由 API Key 权限决定，不能在请求中指定" });
+  const resolvedSubtype = resolveSourceSubtype(sourceSubtypes, key.label, body.sourceSubtype);
+  if (!resolvedSubtype.ok) return reply.code(400).send({ message: resolvedSubtype.message });
+  if (key.allowedSourceSubtypes?.length && !key.allowedSourceSubtypes.includes(resolvedSubtype.definition.id)) {
+    return reply.code(403).send({ message: "当前 API Key 无权使用该 sourceSubtype" });
+  }
+  const taskType = body.taskType == null || body.taskType === "" ? "unspecified" : normalizeIdentifier(body.taskType);
+  const scenarioId = body.scenarioId == null || body.scenarioId === "" ? "unspecified" : normalizeIdentifier(body.scenarioId);
+  const experimentId = body.experimentId == null || body.experimentId === "" ? undefined : normalizeIdentifier(body.experimentId);
+  const runnerVersion = String(body.runnerVersion ?? "").trim().slice(0, 120) || undefined;
+  const metadataSchemaVersion = body.metadataSchemaVersion == null ? 1 : Number(body.metadataSchemaVersion);
+  if (!taskType || !scenarioId || (body.experimentId && !experimentId)) {
+    return reply.code(400).send({ message: "taskType、scenarioId 或 experimentId 格式无效" });
+  }
+  if (!Number.isInteger(metadataSchemaVersion) || metadataSchemaVersion < 1 || metadataSchemaVersion > 1000) {
+    return reply.code(400).send({ message: "metadataSchemaVersion 必须是 1 到 1000 的整数" });
+  }
   const minute = quotaLimiter.take(`mint-minute:${key.id}`, 12, 60_000);
   if (!minute.allowed) return retry(reply, minute.retryAfter);
   const day = quotaLimiter.take(`mint-day:${key.id}`, 500, 24 * 60 * 60_000);
@@ -437,6 +577,8 @@ app.post("/api/collect", async (request, reply) => {
   if (activeCount >= 50) return reply.code(409).send({ message: "当前未使用链接过多，请使用或等待链接过期" });
   const issued = await issueLink(request, {
     label: key.label, issuedByKeyId: key.id, note: String(body.note ?? "").trim().slice(0, 500) || undefined,
+    sourceSubtype: resolvedSubtype.definition.id, taskType, scenarioId, experimentId, runnerVersion,
+    metadataSchemaVersion,
   });
   return reply.code(201).send(issued);
 });
@@ -456,7 +598,10 @@ app.post("/api/human/link", async (request, reply) => {
   failureLimiter.success(limitKey);
   const hourly = quotaLimiter.take(`human-issue:${request.ip}`, 30, 60 * 60_000);
   if (!hourly.allowed) return retry(reply, hourly.retryAfter);
-  const issued = await issueLink(request, { label: "human", nickname, participantId: randomUUID() });
+  const issued = await issueLink(request, {
+    label: "human", nickname, participantId: randomUUID(), sourceSubtype: "human.manual",
+    taskType: "unspecified", scenarioId: "unspecified", metadataSchemaVersion: 1,
+  });
   return reply.code(201).send(issued);
 });
 app.post("/api/claim", async (request: TraceRequest, reply) => {
@@ -477,6 +622,10 @@ app.post("/api/claim", async (request: TraceRequest, reply) => {
   const session: StoredSession = {
     sessionId: randomUUID(), label: link.label, collectionTaskId: link.id, collectionLinkId: link.id,
     participantId: link.participantId ?? null, nickname: link.nickname ?? null, captureMode: "labeled",
+    sourceSubtype: link.sourceSubtype ?? `${link.label}.legacy_unspecified`,
+    taskType: link.taskType ?? "unspecified", scenarioId: link.scenarioId ?? "unspecified",
+    experimentId: link.experimentId ?? null, runnerVersion: link.runnerVersion ?? null,
+    metadataSchemaVersion: link.metadataSchemaVersion ?? 1,
     startedAt: now(), endedAt: now(), sourceIp: request.ip,
     userAgent: String(request.headers["user-agent"] ?? ""), requestCount: 0, trajectoryCount: 0,
   };
@@ -490,7 +639,12 @@ app.get("/collector", async (_request, reply) => reply.redirect("/admin"));
 app.get("/lab/scenarios", async (_request, reply) => reply.redirect("/admin"));
 app.get("/api/session", async (request: TraceRequest, reply) => {
   const session = await ensureCommerceSession(request, reply);
-  return { sessionId: session.sessionId, label: session.label, collectionTaskId: session.collectionTaskId } satisfies SessionInfo;
+  return {
+    sessionId: session.sessionId, label: session.label, collectionTaskId: session.collectionTaskId,
+    sourceSubtype: session.sourceSubtype ?? null, taskType: session.taskType ?? null,
+    scenarioId: session.scenarioId ?? null, experimentId: session.experimentId ?? null,
+    runnerVersion: session.runnerVersion ?? null, metadataSchemaVersion: session.metadataSchemaVersion ?? null,
+  } satisfies SessionInfo;
 });
 app.post("/api/telemetry/batches", async (request: TraceRequest, reply) => {
   const body = request.body as { pageViewId?: string; events?: TelemetryEvent[] };
