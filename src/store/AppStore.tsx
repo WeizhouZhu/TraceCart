@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { getProductById, getVariant } from "../data/catalog";
-import { createId } from "../lib/id";
+import { api } from "../lib/api";
 import { trackBusiness } from "../lib/telemetry";
 import type { CartItem, CheckoutDraft, ScenarioSettings } from "../types";
+import { useCatalog } from "./CatalogStore";
 
 interface StoreState {
   cart: CartItem[];
@@ -27,18 +27,12 @@ interface StoreContextValue extends StoreState {
   toggleCompare: (productId: string) => void;
   updateCheckout: (patch: Partial<CheckoutDraft>) => void;
   setScenario: (scenario: ScenarioSettings) => void;
+  refreshCart: () => void;
   clearCart: () => void;
 }
 
 const initialCheckout: CheckoutDraft = {
-  address: {
-    recipient: "",
-    phone: "",
-    province: "",
-    city: "",
-    district: "",
-    detail: "",
-  },
+  address: { recipient: "", phone: "", province: "", city: "", district: "", detail: "" },
   deliveryMethod: "standard",
   couponCode: "",
   giftWrap: false,
@@ -70,19 +64,13 @@ function readState(): StoreState {
     if (!value) return defaultState;
     const stored = JSON.parse(value) as Partial<StoreState>;
     const storedCheckout = stored.checkout;
-    const normalizedAddress = {
-      ...initialCheckout.address,
-      ...storedCheckout?.address,
-    } as CheckoutDraft["address"] & { postalCode?: unknown };
+    const normalizedAddress = { ...initialCheckout.address, ...storedCheckout?.address } as CheckoutDraft["address"] & { postalCode?: unknown };
     delete normalizedAddress.postalCode;
     return {
       ...defaultState,
       ...stored,
-      checkout: {
-        ...initialCheckout,
-        ...storedCheckout,
-        address: normalizedAddress,
-      },
+      cart: [],
+      checkout: { ...initialCheckout, ...storedCheckout, address: normalizedAddress },
     };
   } catch {
     return defaultState;
@@ -90,23 +78,38 @@ function readState(): StoreState {
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
+  const { getProductById, getVariant } = useCatalog();
   const [state, setState] = useState<StoreState>(readState);
   const [cartOpen, setCartOpen] = useState(false);
   const [lastRemoved, setLastRemoved] = useState<CartItem[]>([]);
+  const [serverSubtotal, setServerSubtotal] = useState<number | null>(null);
+
+  function acceptCart(response: Awaited<ReturnType<typeof api.cart>>) {
+    setState((current) => ({ ...current, cart: response.items }));
+    setServerSubtotal(response.quote.subtotal);
+  }
 
   useEffect(() => {
-    localStorage.setItem("tracecart.store", JSON.stringify(state));
+    let active = true;
+    api.cart().then((response) => { if (active) acceptCart(response); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const persisted = { ...state, cart: [] };
+    localStorage.setItem("tracecart.store", JSON.stringify(persisted));
     sessionStorage.setItem("tracecart.scenario", JSON.stringify(state.scenario));
   }, [state]);
 
   const cartCount = state.cart.reduce((sum, item) => sum + item.quantity, 0);
-  const cartSubtotal = state.cart
+  const calculatedSubtotal = state.cart
     .filter((item) => item.selected)
     .reduce((sum, item) => {
       const product = getProductById(item.productId);
       if (!product) return sum;
       return sum + getVariant(product, item.variantId).price * item.quantity;
     }, 0);
+  const cartSubtotal = serverSubtotal ?? calculatedSubtotal;
 
   const value = useMemo<StoreContextValue>(
     () => ({
@@ -117,61 +120,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setCartOpen,
       lastRemovedCount: lastRemoved.length,
       addToCart(productId, variantId, quantity = 1) {
-        setState((current) => {
-          const existing = current.cart.find(
-            (item) => item.productId === productId && item.variantId === variantId,
-          );
-          const cart = existing
-            ? current.cart.map((item) =>
-                item.id === existing.id
-                  ? { ...item, quantity: Math.min(item.quantity + quantity, 99) }
-                  : item,
-              )
-            : [
-                ...current.cart,
-                {
-                  id: createId(),
-                  productId,
-                  variantId,
-                  quantity,
-                  selected: true,
-                  addedAt: new Date().toISOString(),
-                },
-              ];
-          return { ...current, cart };
-        });
-        trackBusiness("add_to_cart", { productId, variantId, quantity });
         setCartOpen(true);
+        void api.addCartItem(productId, variantId, quantity).then(acceptCart).catch(() => undefined);
+        trackBusiness("add_to_cart", { productId, variantId, quantity });
       },
       updateQuantity(itemId, quantity) {
+        const normalized = Math.max(1, Math.min(quantity, 99));
+        setServerSubtotal(null);
         setState((current) => ({
           ...current,
-          cart: current.cart.map((item) =>
-            item.id === itemId ? { ...item, quantity: Math.max(1, Math.min(quantity, 99)) } : item,
-          ),
+          cart: current.cart.map((item) => item.id === itemId ? { ...item, quantity: normalized } : item),
         }));
-        trackBusiness("update_cart_quantity", { itemId, quantity });
+        void api.updateCartItem(itemId, { quantity: normalized }).then(acceptCart).catch(() => {
+          void api.cart().then(acceptCart);
+        });
+        trackBusiness("update_cart_quantity", { itemId, quantity: normalized });
       },
       toggleSelected(itemId) {
+        const item = state.cart.find((entry) => entry.id === itemId);
+        if (!item) return;
+        const selected = !item.selected;
+        setServerSubtotal(null);
         setState((current) => ({
           ...current,
-          cart: current.cart.map((item) =>
-            item.id === itemId ? { ...item, selected: !item.selected } : item,
-          ),
+          cart: current.cart.map((entry) => entry.id === itemId ? { ...entry, selected } : entry),
         }));
+        void api.updateCartItem(itemId, { selected }).then(acceptCart).catch(() => {
+          void api.cart().then(acceptCart);
+        });
       },
       removeItems(itemIds) {
-        setState((current) => {
-          setLastRemoved(current.cart.filter((item) => itemIds.includes(item.id)));
-          return { ...current, cart: current.cart.filter((item) => !itemIds.includes(item.id)) };
-        });
+        const removed = state.cart.filter((item) => itemIds.includes(item.id));
+        setLastRemoved(removed);
+        setServerSubtotal(null);
+        setState((current) => ({ ...current, cart: current.cart.filter((item) => !itemIds.includes(item.id)) }));
+        void (async () => {
+          let latest: Awaited<ReturnType<typeof api.cart>> | undefined;
+          for (const itemId of itemIds) latest = await api.removeCartItem(itemId);
+          if (latest) acceptCart(latest);
+        })().catch(() => { void api.cart().then(acceptCart); });
         trackBusiness("remove_cart_item", { itemIds });
       },
       undoRemove() {
         if (!lastRemoved.length) return;
-        setState((current) => ({ ...current, cart: [...current.cart, ...lastRemoved] }));
-        trackBusiness("undo_remove_cart_item", { count: lastRemoved.length });
+        const removed = [...lastRemoved];
         setLastRemoved([]);
+        void (async () => {
+          let latest: Awaited<ReturnType<typeof api.cart>> | undefined;
+          for (const item of removed) latest = await api.addCartItem(item.productId, item.variantId, item.quantity);
+          if (latest) acceptCart(latest);
+        })().catch(() => { void api.cart().then(acceptCart); });
+        trackBusiness("undo_remove_cart_item", { count: removed.length });
       },
       toggleFavorite(productId) {
         setState((current) => ({
@@ -198,9 +197,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           checkout: {
             ...current.checkout,
             ...patch,
-            address: patch.address
-              ? { ...current.checkout.address, ...patch.address }
-              : current.checkout.address,
+            address: patch.address ? { ...current.checkout.address, ...patch.address } : current.checkout.address,
           },
         }));
       },
@@ -208,8 +205,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setState((current) => ({ ...current, scenario }));
         trackBusiness("scenario_changed", { ...scenario });
       },
+      refreshCart() {
+        void api.cart().then(acceptCart).catch(() => undefined);
+      },
       clearCart() {
+        setServerSubtotal(0);
         setState((current) => ({ ...current, cart: [] }));
+        void api.clearCart().then(acceptCart).catch(() => undefined);
       },
     }),
     [state, cartCount, cartSubtotal, cartOpen, lastRemoved],

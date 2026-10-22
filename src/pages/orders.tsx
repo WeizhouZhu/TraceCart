@@ -12,10 +12,10 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Breadcrumbs, SectionHeader } from "../components";
-import { getProductById } from "../data/catalog";
 import { api } from "../lib/api";
 import { money } from "../lib/catalog";
 import { trackBusiness } from "../lib/telemetry";
+import { useCatalog } from "../store/CatalogStore";
 import type { Order, OrderStatus } from "../types";
 
 type StatusMeta = {
@@ -103,6 +103,7 @@ function OrderCard({
   confirming?: boolean;
   onConfirm?: (order: Order) => void;
 }) {
+  const { getProductById } = useCatalog();
   const meta = getOrderStatusMeta(order.status);
   const Icon = meta.icon;
   const firstProduct = getProductById(order.items[0]?.productId);

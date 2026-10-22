@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -25,10 +25,12 @@ import {
   Rating,
   SectionHeader,
 } from "../components";
-import { brands, categories, getProductById, getProductBySlug, getVariant, products } from "../data/catalog";
-import { money, searchCatalog, type SortMode } from "../lib/catalog";
+import { api } from "../lib/api";
+import { money, type SortMode } from "../lib/catalog";
 import { trackBusiness } from "../lib/telemetry";
 import { useStore } from "../store/AppStore";
+import { useCatalog } from "../store/CatalogStore";
+import type { Product } from "../types";
 import { HomeOrdersSection } from "./orders";
 
 function useTitle(title: string) {
@@ -39,6 +41,7 @@ function useTitle(title: string) {
 
 export function HomePage() {
   useTitle("品质生活商城");
+  const { products, categories } = useCatalog();
   const featured = products.filter((product) => product.featured).slice(0, 10);
   const newItems = products.filter((product) => product.isNew).slice(0, 5);
   const heroProduct = products[0];
@@ -165,6 +168,7 @@ export function HomePage() {
 
 export function SearchPage() {
   const [params, setParams] = useSearchParams();
+  const { categories, brands } = useCatalog();
   const query = params.get("q") ?? "";
   const category = params.get("category") ?? "";
   const sort = (params.get("sort") ?? "relevance") as SortMode;
@@ -178,20 +182,28 @@ export function SearchPage() {
   const rating = Number(params.get("rating") ?? 0);
   const inStock = params.get("inStock") === "1";
 
-  const result = useMemo(
-    () =>
-      searchCatalog({
-        query,
-        category: category || undefined,
-        brands: brandParams,
-        minPrice: minPrice ? minPrice * 100 : undefined,
-        maxPrice: maxPrice ? maxPrice * 100 : undefined,
-        minRating: rating || undefined,
-        inStock,
-        sort,
-      }),
-    [query, category, params.toString()],
-  );
+  const [result, setResult] = useState<Product[]>([]);
+  const [searching, setSearching] = useState(true);
+  const queryKey = params.toString();
+
+  useEffect(() => {
+    const requestParams = new URLSearchParams();
+    if (query) requestParams.set("q", query);
+    if (category) requestParams.set("category", category);
+    if (brandParams.length) requestParams.set("brands", brandParams.join(","));
+    if (minPrice) requestParams.set("minPrice", String(minPrice));
+    if (maxPrice) requestParams.set("maxPrice", String(maxPrice));
+    if (rating) requestParams.set("minRating", String(rating));
+    if (inStock) requestParams.set("inStock", "true");
+    requestParams.set("sort", sort);
+    let active = true;
+    setSearching(true);
+    api.searchProducts(requestParams)
+      .then((response) => { if (active) setResult(response.items); })
+      .catch(() => { if (active) setResult([]); })
+      .finally(() => { if (active) setSearching(false); });
+    return () => { active = false; };
+  }, [queryKey]);
 
   const categoryInfo = categories.find((item) => item.slug === category);
 
@@ -283,7 +295,7 @@ export function SearchPage() {
           </aside>
         )}
         <section className="listing-results">
-          <ProductGrid items={result} />
+          {searching ? <div className="empty-state"><RefreshCw className="spin" /><p>正在更新商品信息…</p></div> : <ProductGrid items={result} />}
           {result.length > 0 && (
             <div className="pagination">
               <button disabled>上一页</button><button className="active">1</button><button disabled={result.length < 20}>2</button><button disabled={result.length < 20}>下一页</button>
@@ -307,18 +319,42 @@ function FilterBlock({ title, children }: { title: string; children: React.React
 
 export function ProductPage() {
   const { slug } = useParams();
-  const product = getProductBySlug(slug ?? "");
+  const { categories, products, getProductBySlug, getVariant } = useCatalog();
+  const catalogProduct = getProductBySlug(slug ?? "");
   const { addToCart, favorites, toggleFavorite, compare, toggleCompare } = useStore();
-  const [variantId, setVariantId] = useState(product?.variants[0]?.id ?? "");
+  const [product, setProduct] = useState<Product | undefined>(catalogProduct);
+  const [recommendations, setRecommendations] = useState<Product[]>([]);
+  const [variantId, setVariantId] = useState(catalogProduct?.variants[0]?.id ?? "");
   const [quantity, setQuantity] = useState(1);
   const [imageIndex, setImageIndex] = useState(0);
   const [tab, setTab] = useState("detail");
   useTitle(product?.title ?? "商品不存在");
 
+  useEffect(() => {
+    const current = getProductBySlug(slug ?? "");
+    setProduct(current);
+    setVariantId(current?.variants[0]?.id ?? "");
+    setRecommendations(current
+      ? products.filter((item) => item.categoryId === current.categoryId && item.id !== current.id).slice(0, 5)
+      : []);
+    if (!slug || !current) return;
+    let active = true;
+    Promise.all([api.product(slug), api.productVariants(slug), api.recommendations(slug)])
+      .then(([detail, variants, related]) => {
+        if (!active) return;
+        setProduct({ ...detail.product, variants: variants.variants });
+        setVariantId((selected) => variants.variants.some((item) => item.id === selected)
+          ? selected
+          : variants.variants[0]?.id ?? "");
+        setRecommendations(related.items);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [slug]);
+
   if (!product) return <NotFoundPage />;
   const variant = getVariant(product, variantId);
   const category = categories.find((item) => item.id === product.categoryId);
-  const recommendations = products.filter((item) => item.categoryId === product.categoryId && item.id !== product.id).slice(0, 5);
   const favorite = favorites.includes(product.id);
   const compared = compare.includes(product.id);
   const selectedProductId = product.id;
@@ -392,6 +428,7 @@ export function ProductPage() {
 
 export function CartPage() {
   const navigate = useNavigate();
+  const { products } = useCatalog();
   const { cart, cartSubtotal, removeItems, lastRemovedCount, undoRemove } = useStore();
   useTitle("购物车");
   const selected = cart.filter((item) => item.selected);
@@ -435,16 +472,18 @@ function Trash2Icon() {
 }
 
 export function FavoritesPage() {
+  const { getProductById } = useCatalog();
   const { favorites } = useStore();
   useTitle("我的收藏");
-  const items = favorites.map(getProductById).filter(Boolean) as typeof products;
+  const items = favorites.map(getProductById).filter(Boolean) as Product[];
   return <div className="container simple-page"><Breadcrumbs items={[{ label: "我的收藏" }]} /><div className="page-title-row"><div><span className="eyebrow">SAVED ITEMS</span><h1>我的收藏</h1><p>收藏内容保存在当前浏览器中。</p></div><span className="result-count"><strong>{items.length}</strong><span>件商品</span></span></div><ProductGrid items={items} emptyText="还没有收藏商品" /></div>;
 }
 
 export function ComparePage() {
+  const { getProductById } = useCatalog();
   const { compare, toggleCompare } = useStore();
   useTitle("商品对比");
-  const items = compare.map(getProductById).filter(Boolean) as typeof products;
+  const items = compare.map(getProductById).filter(Boolean) as Product[];
   const specNames = [...new Set(items.flatMap((item) => Object.keys(item.specifications)))];
   return (
     <div className="container simple-page">

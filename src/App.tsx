@@ -4,6 +4,7 @@ import { PageShell } from "./components";
 import { initTelemetry, trackPageView } from "./lib/telemetry";
 import { AdminPage, ClaimPage, HumanPage } from "./pages/operations";
 import { StoreProvider } from "./store/AppStore";
+import { CatalogProvider } from "./store/CatalogStore";
 import {
   CartPage,
   ComparePage,
@@ -57,7 +58,8 @@ function StorefrontApp() {
     initTelemetry();
   }, []);
   return (
-    <StoreProvider>
+    <CatalogProvider>
+      <StoreProvider>
       <RouteTelemetry />
       <Routes>
         <Route path="/payment/:paymentId" element={<PaymentPage />} />
@@ -66,7 +68,8 @@ function StorefrontApp() {
         <Route path="/payment/result/:paymentId" element={<PaymentResultPage />} />
         <Route path="*" element={<StoreRoutes />} />
       </Routes>
-    </StoreProvider>
+      </StoreProvider>
+    </CatalogProvider>
   );
 }
 

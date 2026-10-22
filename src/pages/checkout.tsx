@@ -21,7 +21,6 @@ import {
 import QRCode from "qrcode";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Breadcrumbs } from "../components";
-import { getProductById, getVariant } from "../data/catalog";
 import {
   checkoutRegions,
   getCheckoutAddressErrors,
@@ -34,7 +33,8 @@ import { money } from "../lib/catalog";
 import { createId } from "../lib/id";
 import { trackBusiness } from "../lib/telemetry";
 import { useStore } from "../store/AppStore";
-import type { Order, PaymentMethod, PaymentSession } from "../types";
+import { useCatalog } from "../store/CatalogStore";
+import type { CartQuote, Order, PaymentMethod, PaymentSession } from "../types";
 import { getOrderStatusMeta } from "./orders";
 
 function useTitle(title: string) {
@@ -53,7 +53,8 @@ const deliveryPrices = {
 export function CheckoutPage() {
   useTitle("游客结算");
   const navigate = useNavigate();
-  const { cart, cartSubtotal, checkout, updateCheckout, clearCart } = useStore();
+  const { getProductById, getVariant } = useCatalog();
+  const { cart, cartSubtotal, checkout, updateCheckout, refreshCart } = useStore();
   const selected = cart.filter((item) => item.selected);
   const [step, setStep] = useState(1);
   const [couponStatus, setCouponStatus] = useState<"idle" | "valid" | "invalid">("idle");
@@ -61,10 +62,39 @@ export function CheckoutPage() {
   const [error, setError] = useState("");
   const [addressSubmitted, setAddressSubmitted] = useState(false);
   const [addressTouched, setAddressTouched] = useState<Partial<Record<CheckoutAddressField, boolean>>>({});
-  const discount = cartSubtotal >= 50000 ? 4000 : couponStatus === "valid" ? 3000 : 0;
-  const shipping = deliveryPrices[checkout.deliveryMethod];
-  const total = Math.max(0, cartSubtotal - discount + shipping);
-  const payableTotal = total + (checkout.giftWrap ? 1200 : 0);
+  const fallbackQuote: CartQuote = {
+    subtotal: cartSubtotal,
+    discount: cartSubtotal >= 50000 ? 4000 : couponStatus === "valid" ? 3000 : 0,
+    shipping: deliveryPrices[checkout.deliveryMethod],
+    total: Math.max(0, cartSubtotal - (cartSubtotal >= 50000 ? 4000 : couponStatus === "valid" ? 3000 : 0)
+      + deliveryPrices[checkout.deliveryMethod] + (checkout.giftWrap ? 1200 : 0)),
+  };
+  const [serverQuote, setServerQuote] = useState<CartQuote | null>(null);
+  const quote = serverQuote ?? fallbackQuote;
+  const discount = quote.discount;
+  const shipping = quote.shipping;
+  const payableTotal = quote.total;
+  const effectiveCheckout = {
+    ...checkout,
+    couponCode: couponStatus === "valid" ? checkout.couponCode : "",
+  };
+  const quoteKey = JSON.stringify([
+    selected.map((item) => [item.id, item.quantity, item.selected]),
+    effectiveCheckout.deliveryMethod,
+    effectiveCheckout.couponCode,
+    effectiveCheckout.giftWrap,
+  ]);
+
+  useEffect(() => {
+    let active = true;
+    api.checkoutQuote(effectiveCheckout).then((response) => {
+      if (active) setServerQuote(response.quote);
+    }).catch(() => {
+      if (active) setServerQuote(null);
+    });
+    return () => { active = false; };
+  }, [quoteKey]);
+
   const addressErrors = useMemo(() => getCheckoutAddressErrors(checkout.address), [checkout.address]);
   const addressValid = Object.keys(addressErrors).length === 0;
   const cityOptions = getCitiesForProvince(checkout.address.province);
@@ -122,13 +152,13 @@ export function CheckoutPage() {
     try {
       const order = await api.createOrder({
         items: selected,
-        quote: { subtotal: cartSubtotal, discount, shipping, total: payableTotal },
-        checkout,
+        quote,
+        checkout: effectiveCheckout,
         idempotencyKey: createId(),
       });
       const payment = await api.createPayment(order.id, "qr");
       trackBusiness("order_created", { orderId: order.id, paymentId: payment.id, total: payableTotal });
-      clearCart();
+      refreshCart();
       navigate("/payment/" + payment.id, { state: { orderToken: order.token } });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建订单失败，请重试。");
@@ -265,7 +295,7 @@ export function CheckoutPage() {
         <aside className="checkout-summary">
           <span className="eyebrow">ORDER SUMMARY</span><h2>订单摘要</h2>
           <div className="checkout-summary__items">{selected.slice(0, 3).map((item) => { const product = getProductById(item.productId); if (!product) return null; return <span key={item.id}><img src={product.images[0]} alt="" /><em>{item.quantity}</em></span>; })}{selected.length > 3 && <strong>+{selected.length - 3}</strong>}</div>
-          <div><span>商品小计</span><strong>{money(cartSubtotal)}</strong></div>
+          <div><span>商品小计</span><strong>{money(quote.subtotal)}</strong></div>
           <div><span>优惠</span><strong className="discount">-{money(discount)}</strong></div>
           <div><span>配送</span><strong>{shipping ? money(shipping) : "免费"}</strong></div>
           {checkout.giftWrap && <div><span>礼品包装</span><strong>{money(1200)}</strong></div>}
@@ -444,7 +474,6 @@ export function PaymentResultPage() {
   const success = payment.status === "succeeded";
   const errorMessages: Record<string, string> = {
     insufficient_funds: "账户余额不足",
-    risk_rejected: "本次交易未通过安全检查",
     network_error: "支付网络暂时不可用",
     expired: "支付会话已过期",
   };
@@ -484,6 +513,7 @@ export function PaymentResultPage() {
 
 export function OrderPage() {
   const { orderToken } = useParams();
+  const { getProductById, getVariant } = useCatalog();
   const navigate = useNavigate();
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState("");

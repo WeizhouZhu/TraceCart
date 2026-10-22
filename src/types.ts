@@ -100,7 +100,7 @@ export interface PaymentSession {
   orderId: string;
   method: PaymentMethod;
   status: PaymentStatus;
-  outcome: "succeeded" | "insufficient_funds" | "risk_rejected" | "network_error" | "expired";
+  outcome: "succeeded" | "insufficient_funds" | "network_error" | "expired";
   amount: number;
   createdAt: string;
   expiresAt: string;
@@ -166,4 +166,45 @@ export interface TelemetryEvent {
   clientTimestamp: string;
   route: string;
   payload: Record<string, unknown>;
+}
+
+
+export interface CatalogPayload {
+  categories: Category[];
+  brands: string[];
+  products: Product[];
+  fetchedAt: string;
+}
+
+export interface ProductSuggestion {
+  id: string;
+  slug: string;
+  title: string;
+  brand: string;
+  price: number;
+  image: string;
+}
+
+export interface SearchResponse {
+  items: Product[];
+  total: number;
+  fetchedAt: string;
+}
+
+export interface CartResponse {
+  items: CartItem[];
+  quote: CartQuote;
+  updatedAt: string;
+  validatedAt?: string;
+}
+
+export interface ProductResponse {
+  product: Product;
+  fetchedAt: string;
+}
+
+export interface ProductVariantsResponse {
+  productId: string;
+  variants: ProductVariant[];
+  fetchedAt: string;
 }

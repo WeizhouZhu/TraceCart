@@ -4,12 +4,13 @@ TraceCart 是一个 PC 优先的高保真 Mock 电商与轨迹/请求数据采�
 
 ## 已实现
 
-- 8 个分类、40 个 SPU、约 120 个 SKU 的稳定商品 Fixture。
+- 8 个分类、40 个 SPU、约 120 个 SKU 的服务端商品目录。
+- 公开商城信息的部分 SSR，以及 SKU、库存、价格、推荐、购物车和结算的动态 API。
 - 关键词、品牌、分类、价格、评分、库存和排序检索。
 - 商品详情、规格选择、收藏、对比和最近浏览结构。
 - 加入购物车、数量修改、选择、删除和撤销。
 - 四步游客结算、虚构测试地址、优惠码 TRACE30。
-- 二维码支付、跳转收银台及 75% 默认成功率。
+- 二维码支付、跳转收银台及 80% 默认成功率。
 - Human、普通 Script 和 LLM Agent 的鉴权式一次性采集链接。
 - 鼠标、点击、滚动、页面和业务事件批量采集。
 - 请求和轨迹 NDJSON 原始存储。
@@ -55,6 +56,7 @@ pnpm run build
 - /human：人工参与者验证和专属链接领取；不进入数据集
 - /c#token：统一的一次性链接入口；领取动作不进入数据集
 - /api/collect：Script 和 Agent 的机器可读接入与链接签发 API
+- /api/store/*：商品、搜索、购物车与结算报价 API
 - /api/health：服务健康检查
 
 ## 有标签采集
@@ -99,6 +101,7 @@ data/
 ├── access-links.json
 ├── api-keys.json
 ├── source-subtypes.json
+├── carts.json
 ├── orders.json
 ├── payments.json
 ├── requests.ndjson
@@ -113,6 +116,7 @@ data/
 - [服务器端构建与原子发布脚本](deploy/remote-deploy.sh)
 - [数据采集方案](docs/data-collection-plan.zh-CN.md)
 - [电商前端设计](docs/commerce-frontend-design.zh-CN.md)
+- [商城服务端化与部分 SSR 架构](docs/storefront-server-architecture.zh-CN.md)
 
 生产服务器的唯一源码工作副本位于 `/srv/tracecart/source`。服务器端更新流程：
 

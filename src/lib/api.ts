@@ -1,4 +1,4 @@
-import type { LabelTask, Order, PaymentMethod, PaymentSession, SessionInfo } from "../types";
+import type { CartResponse, CatalogPayload, CheckoutDraft, LabelTask, Order, PaymentMethod, PaymentSession, Product, ProductResponse, ProductSuggestion, ProductVariantsResponse, SearchResponse, SessionInfo } from "../types";
 
 const API_BASE = "";
 
@@ -31,6 +31,48 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   session: () => request<SessionInfo>("/api/session"),
+
+  catalog: () => request<CatalogPayload>("/api/store/catalog"),
+
+  searchProducts: (params: URLSearchParams) =>
+    request<SearchResponse>("/api/store/search?" + params.toString()),
+
+  suggestions: (query: string) =>
+    request<{ items: ProductSuggestion[]; fetchedAt: string }>("/api/store/search/suggestions?q=" + encodeURIComponent(query)),
+
+  product: (slug: string) =>
+    request<ProductResponse>("/api/store/products/" + encodeURIComponent(slug)),
+
+  productVariants: (slug: string) =>
+    request<ProductVariantsResponse>("/api/store/products/" + encodeURIComponent(slug) + "/variants"),
+
+  recommendations: (slug: string) =>
+    request<{ items: Product[]; fetchedAt: string }>("/api/store/products/" + encodeURIComponent(slug) + "/recommendations"),
+
+  cart: () => request<CartResponse>("/api/store/cart"),
+
+  addCartItem: (productId: string, variantId: string, quantity: number) =>
+    request<CartResponse>("/api/store/cart/items", {
+      method: "POST",
+      body: JSON.stringify({ productId, variantId, quantity }),
+    }),
+
+  updateCartItem: (itemId: string, patch: { quantity?: number; selected?: boolean }) =>
+    request<CartResponse>("/api/store/cart/items/" + encodeURIComponent(itemId), {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  removeCartItem: (itemId: string) =>
+    request<CartResponse>("/api/store/cart/items/" + encodeURIComponent(itemId), { method: "DELETE" }),
+
+  clearCart: () => request<CartResponse>("/api/store/cart", { method: "DELETE" }),
+
+  checkoutQuote: (checkout: Partial<CheckoutDraft>) =>
+    request<CartResponse>("/api/store/checkout/quote", {
+      method: "POST",
+      body: JSON.stringify({ checkout }),
+    }),
 
   createOrder: (payload: unknown) =>
     request<Order>("/api/orders", {

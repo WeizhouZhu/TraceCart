@@ -1,15 +1,16 @@
 import { createReadStream } from "node:fs";
-import { rm, stat } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import { verify } from "@node-rs/argon2";
-import type { ActorLabel, Order, PaymentMethod, PaymentSession, SessionInfo, TelemetryEvent } from "../src/types";
+import type { ActorLabel, CartItem, CheckoutDraft, Order, PaymentMethod, PaymentSession, SessionInfo, TelemetryEvent } from "../src/types";
 import { createParquetExport } from "./export";
 import { DATA_DIR, EXPORT_DIR, appendNdjson, ensureDataDirectories, readJson, readNdjson, writeJson } from "./storage";
 import { advanceOrderLifecycle, confirmOrderReceipt, markOrderPaid } from "./order-lifecycle";
+import { calculateCartQuote, getProductBySlug, getSuggestions, publicCatalog, recommendationsFor, renderStorefrontDocument, searchCatalog, validateCartItems } from "./storefront";
 import { FailureLimiter, WindowLimiter, safeDigestEqual, sanitizeNickname, secretDigest } from "./security";
 import {
   normalizeDisplayName,
@@ -34,7 +35,8 @@ interface StoredSession extends SessionInfo {
 }
 interface StoredOrder extends Order { sessionId: string; idempotencyKey: string }
 interface StoredPayment extends PaymentSession { sessionId: string }
-interface RequestBodyOrder { items: Order["items"]; quote: Order["quote"]; checkout: Order["checkout"]; idempotencyKey: string }
+interface StoredCart { sessionId: string; items: CartItem[]; updatedAt: string }
+interface RequestBodyOrder { items?: Order["items"]; quote?: Order["quote"]; checkout: Order["checkout"]; idempotencyKey: string }
 interface TraceRequest extends FastifyRequest { traceStart?: bigint; traceSessionId?: string }
 interface AccessLink {
   id: string;
@@ -74,6 +76,7 @@ await ensureDataDirectories();
 let sessions = await readJson<StoredSession[]>("sessions.json", []);
 let orders = await readJson<StoredOrder[]>("orders.json", []);
 let payments = await readJson<StoredPayment[]>("payments.json", []);
+let carts = await readJson<StoredCart[]>("carts.json", []);
 let accessLinks = await readJson<AccessLink[]>("access-links.json", []);
 let apiKeys = await readJson<ApiKeyRecord[]>("api-keys.json", []);
 let sourceSubtypes = await readJson<SourceSubtypeDefinition[]>("source-subtypes.json", []);
@@ -131,6 +134,7 @@ async function persistApiKeys() { await writeJson("api-keys.json", apiKeys) }
 async function persistSourceSubtypes() { await writeJson("source-subtypes.json", sourceSubtypes) }
 async function persistOrders() { await writeJson("orders.json", orders) }
 async function persistPayments() { await writeJson("payments.json", payments) }
+async function persistCarts() { await writeJson("carts.json", carts) }
 
 async function seedApiKeys() {
   if (apiKeys.length) return;
@@ -185,7 +189,7 @@ function commercePage(pathname: string) {
     /^\/(search|product\/[^/]+|cart|checkout|favorites|compare|orders|order\/[^/]+|service|payment\/.*)$/.test(pathname);
 }
 function commerceApi(pathname: string) {
-  return pathname === "/api/session" || pathname === "/api/orders" ||
+  return pathname === "/api/session" || pathname.startsWith("/api/store/") || pathname === "/api/orders" ||
     pathname.startsWith("/api/orders/") || pathname === "/api/payments" || pathname.startsWith("/api/payments/");
 }
 function collectableRequest(pathname: string) {
@@ -222,7 +226,7 @@ async function ensureCommerceSession(request: TraceRequest, reply: FastifyReply)
   cleanupPendingUnlabeledSessions();
   const rawCookie = request.cookies.tc_session;
   const signedId = readSignedCookie(request, "tc_session");
-  let session = findCommerceSession(signedId);
+  let session = findCommerceSession(request.traceSessionId ?? signedId);
   if (!session && rawCookie && /^[0-9a-f-]{36}$/i.test(rawCookie)) {
     const legacy = sessions.find((item) => item.sessionId === rawCookie && item.label === null);
     if (legacy) {
@@ -677,24 +681,200 @@ app.post("/api/telemetry/batches", async (request: TraceRequest, reply) => {
   return { accepted: events.length };
 });
 
+
+function cartFor(sessionId: string) {
+  let cart = carts.find((item) => item.sessionId === sessionId);
+  if (!cart) {
+    cart = { sessionId, items: [], updatedAt: now() };
+    carts.push(cart);
+  }
+  return cart;
+}
+
+function cartResponse(cart: StoredCart, checkout?: Partial<CheckoutDraft>) {
+  return {
+    items: cart.items,
+    quote: calculateCartQuote(cart.items, checkout),
+    updatedAt: cart.updatedAt,
+  };
+}
+
+app.get("/api/store/catalog", async (request: TraceRequest, reply) => {
+  await ensureCommerceSession(request, reply);
+  return { ...publicCatalog(), fetchedAt: now() };
+});
+
+app.get("/api/store/search", async (request: TraceRequest, reply) => {
+  await ensureCommerceSession(request, reply);
+  const query = request.query as Record<string, string | undefined>;
+  const number = (value: string | undefined, multiplier = 1) => {
+    const result = Number(value);
+    return Number.isFinite(result) && result > 0 ? result * multiplier : undefined;
+  };
+  const items = searchCatalog({
+    query: query.q,
+    category: query.category,
+    brands: query.brands?.split(",").map((item) => item.trim()).filter(Boolean),
+    minPrice: number(query.minPrice, 100),
+    maxPrice: number(query.maxPrice, 100),
+    minRating: number(query.minRating),
+    inStock: query.inStock === "true",
+    sort: ["relevance", "sales", "newest", "price-asc", "price-desc", "rating"].includes(query.sort ?? "")
+      ? query.sort as "relevance" | "sales" | "newest" | "price-asc" | "price-desc" | "rating"
+      : "relevance",
+  });
+  return { items, total: items.length, fetchedAt: now() };
+});
+
+app.get("/api/store/search/suggestions", async (request: TraceRequest, reply) => {
+  await ensureCommerceSession(request, reply);
+  const { q = "" } = request.query as { q?: string };
+  return { items: getSuggestions(q), fetchedAt: now() };
+});
+
+app.get("/api/store/products/:slug", async (request: TraceRequest, reply) => {
+  await ensureCommerceSession(request, reply);
+  const { slug } = request.params as { slug: string };
+  const product = getProductBySlug(slug);
+  if (!product) return reply.code(404).send({ message: "商品不存在" });
+  return { product, fetchedAt: now() };
+});
+
+app.get("/api/store/products/:slug/variants", async (request: TraceRequest, reply) => {
+  await ensureCommerceSession(request, reply);
+  const { slug } = request.params as { slug: string };
+  const product = getProductBySlug(slug);
+  if (!product) return reply.code(404).send({ message: "商品不存在" });
+  return { productId: product.id, variants: product.variants, fetchedAt: now() };
+});
+
+app.get("/api/store/products/:slug/recommendations", async (request: TraceRequest, reply) => {
+  await ensureCommerceSession(request, reply);
+  const { slug } = request.params as { slug: string };
+  const product = getProductBySlug(slug);
+  if (!product) return reply.code(404).send({ message: "商品不存在" });
+  return { items: recommendationsFor(product), fetchedAt: now() };
+});
+
+app.get("/api/store/cart", async (request: TraceRequest, reply) => {
+  const session = await ensureCommerceSession(request, reply);
+  return cartResponse(cartFor(session.sessionId));
+});
+
+
+app.post("/api/store/cart/items", async (request: TraceRequest, reply) => {
+  const session = await ensureCommerceSession(request, reply);
+  const body = (request.body ?? {}) as { productId?: string; variantId?: string; quantity?: number };
+  const product = publicCatalog().products.find((item) => item.id === body.productId);
+  const variant = product?.variants.find((item) => item.id === body.variantId);
+  const quantity = Math.max(1, Math.min(99, Math.trunc(Number(body.quantity) || 1)));
+  if (!product || !variant) return reply.code(404).send({ message: "商品或规格不存在" });
+  const cart = cartFor(session.sessionId);
+  const existing = cart.items.find((item) => item.productId === product.id && item.variantId === variant.id);
+  const nextQuantity = (existing?.quantity ?? 0) + quantity;
+  if (nextQuantity > variant.stock) return reply.code(409).send({ message: "商品库存不足" });
+  if (existing) {
+    existing.quantity = nextQuantity;
+    existing.selected = true;
+  } else {
+    cart.items.push({
+      id: randomUUID(),
+      productId: product.id,
+      variantId: variant.id,
+      quantity,
+      selected: true,
+      addedAt: now(),
+    });
+  }
+  cart.updatedAt = now();
+  await persistCarts();
+  return reply.code(201).send(cartResponse(cart));
+});
+
+app.patch("/api/store/cart/items/:itemId", async (request: TraceRequest, reply) => {
+  const session = await ensureCommerceSession(request, reply);
+  const { itemId } = request.params as { itemId: string };
+  const body = (request.body ?? {}) as { quantity?: number; selected?: boolean };
+  const cart = cartFor(session.sessionId);
+  const item = cart.items.find((entry) => entry.id === itemId);
+  if (!item) return reply.code(404).send({ message: "购物车商品不存在" });
+  if (body.quantity != null) {
+    const quantity = Math.max(1, Math.min(99, Math.trunc(Number(body.quantity) || 1)));
+    const validation = validateCartItems([{ ...item, quantity }]);
+    if (validation.errors.length) return reply.code(409).send({ message: validation.errors[0] });
+    item.quantity = quantity;
+  }
+  if (typeof body.selected === "boolean") item.selected = body.selected;
+  cart.updatedAt = now();
+  await persistCarts();
+  return cartResponse(cart);
+});
+
+app.delete("/api/store/cart/items/:itemId", async (request: TraceRequest, reply) => {
+  const session = await ensureCommerceSession(request, reply);
+  const { itemId } = request.params as { itemId: string };
+  const cart = cartFor(session.sessionId);
+  cart.items = cart.items.filter((item) => item.id !== itemId);
+  cart.updatedAt = now();
+  await persistCarts();
+  return cartResponse(cart);
+});
+
+app.delete("/api/store/cart", async (request: TraceRequest, reply) => {
+  const session = await ensureCommerceSession(request, reply);
+  const cart = cartFor(session.sessionId);
+  cart.items = [];
+  cart.updatedAt = now();
+  await persistCarts();
+  return cartResponse(cart);
+});
+
+app.post("/api/store/checkout/quote", async (request: TraceRequest, reply) => {
+  const session = await ensureCommerceSession(request, reply);
+  const body = (request.body ?? {}) as { checkout?: Partial<CheckoutDraft> };
+  const cart = cartFor(session.sessionId);
+  const validation = validateCartItems(cart.items.filter((item) => item.selected));
+  if (validation.errors.length) return reply.code(409).send({ message: validation.errors[0] });
+  return { ...cartResponse(cart, body.checkout), validatedAt: now() };
+});
+
 app.post("/api/orders", async (request: TraceRequest, reply) => {
   const session = await ensureCommerceSession(request, reply);
-  const body = request.body as RequestBodyOrder;
-  if (!Array.isArray(body.items) || body.items.length === 0 || !body.checkout || !body.quote) {
-    return reply.code(400).send({ message: "订单信息不完整" });
-  }
+  const body = (request.body ?? {}) as RequestBodyOrder;
+  if (!body.checkout) return reply.code(400).send({ message: "订单信息不完整" });
   const prior = body.idempotencyKey
     ? orders.find((order) => order.sessionId === session.sessionId && order.idempotencyKey === body.idempotencyKey)
     : undefined;
   if (prior) return publicOrder(prior);
+
+  const cart = cartFor(session.sessionId);
+  const selectedCartItems = cart.items.filter((item) => item.selected);
+  const submittedItems = Array.isArray(body.items) ? body.items.filter((item) => item.selected) : [];
+  const sourceItems = selectedCartItems.length ? selectedCartItems : submittedItems;
+  if (!sourceItems.length) return reply.code(400).send({ message: "请选择需要结算的商品" });
+  const validation = validateCartItems(sourceItems);
+  if (validation.errors.length) return reply.code(409).send({ message: validation.errors[0] });
+  const verifiedItems = validation.valid.map((entry) => entry.item);
+  const verifiedQuote = calculateCartQuote(verifiedItems, body.checkout);
+
   const id = "TC" + Date.now().toString().slice(-10) + Math.floor(Math.random() * 90 + 10);
   const order: StoredOrder = {
-    id, token: randomBytes(18).toString("base64url"), items: body.items, quote: body.quote, checkout: body.checkout,
-    status: "awaiting_payment", createdAt: now(), statusUpdatedAt: now(), sessionId: session.sessionId,
+    id,
+    token: randomBytes(18).toString("base64url"),
+    items: verifiedItems,
+    quote: verifiedQuote,
+    checkout: body.checkout,
+    status: "awaiting_payment",
+    createdAt: now(),
+    statusUpdatedAt: now(),
+    sessionId: session.sessionId,
     idempotencyKey: body.idempotencyKey || randomUUID(),
   };
   orders.push(order);
-  await persistOrders();
+  const checkedOutIds = new Set(verifiedItems.map((item) => item.id));
+  cart.items = cart.items.filter((item) => !checkedOutIds.has(item.id));
+  cart.updatedAt = now();
+  await Promise.all([persistOrders(), persistCarts()]);
   return reply.code(201).send(publicOrder(order));
 });
 
@@ -733,13 +913,12 @@ function publicOrder(order: StoredOrder): Order {
 }
 function chooseOutcome(forced: string, method: PaymentMethod): PaymentSession["outcome"] {
   if (method === "cod") return "succeeded";
-  if (["succeeded", "insufficient_funds", "risk_rejected", "network_error", "expired"].includes(forced)) {
+  if (["succeeded", "insufficient_funds", "network_error", "expired"].includes(forced)) {
     return forced as PaymentSession["outcome"];
   }
   const value = Math.random();
-  if (value < 0.75) return "succeeded";
-  if (value < 0.85) return "insufficient_funds";
-  if (value < 0.91) return "risk_rejected";
+  if (value < 0.8) return "succeeded";
+  if (value < 0.9) return "insufficient_funds";
   if (value < 0.96) return "network_error";
   return "expired";
 }
@@ -811,10 +990,15 @@ function publicPayment(payment: StoredPayment): PaymentSession {
   return result;
 }
 const clientRoot = path.resolve(process.env.TRACECART_CLIENT_DIR ?? path.join(process.cwd(), "dist", "client"));
-await app.register(fastifyStatic, { root: clientRoot, prefix: "/", wildcard: false });
+const clientIndex = await readFile(path.join(clientRoot, "index.html"), "utf8");
+await app.register(fastifyStatic, { root: clientRoot, prefix: "/", wildcard: false, index: false });
 app.setNotFoundHandler((request, reply) => {
   if (request.url.startsWith("/api/")) return reply.code(404).send({ message: "API 路由不存在" });
-  return reply.type("text/html").sendFile("index.html");
+  const pathname = requestPath(request);
+  const document = commercePage(pathname)
+    ? renderStorefrontDocument(clientIndex, request.url)
+    : clientIndex;
+  return reply.header("Cache-Control", "no-store").type("text/html").send(document);
 });
 const port = Number(process.env.PORT ?? 3100);
 const host = process.env.HOST ?? "0.0.0.0";

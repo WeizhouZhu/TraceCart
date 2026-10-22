@@ -418,13 +418,12 @@ function publicOrder(order: StoredOrder): Order {
 
 function chooseOutcome(forced: string, method: PaymentMethod): PaymentSession["outcome"] {
   if (method === "cod") return "succeeded";
-  if (["succeeded", "insufficient_funds", "risk_rejected", "network_error", "expired"].includes(forced)) {
+  if (["succeeded", "insufficient_funds", "network_error", "expired"].includes(forced)) {
     return forced as PaymentSession["outcome"];
   }
   const value = Math.random();
-  if (value < 0.75) return "succeeded";
-  if (value < 0.85) return "insufficient_funds";
-  if (value < 0.91) return "risk_rejected";
+  if (value < 0.8) return "succeeded";
+  if (value < 0.9) return "insufficient_funds";
   if (value < 0.96) return "network_error";
   return "expired";
 }

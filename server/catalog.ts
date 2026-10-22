@@ -1,4 +1,4 @@
-import type { Category, Product, ProductVariant, Review } from "../types";
+import type { Category, Product, ProductVariant, Review } from "../src/types";
 
 export const categories: Category[] = [
   { id: "digital", name: "数码配件", slug: "digital", description: "耳机、音箱、影像与智能设备", icon: "Headphones", accent: "#6c5ce7" },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ArrowRight,
   ChevronDown,
@@ -16,12 +16,13 @@ import {
   X,
 } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { categories, getProductById, getVariant, products } from "./data/catalog";
-import { getSuggestions, money } from "./lib/catalog";
+import { api } from "./lib/api";
+import { money } from "./lib/catalog";
 import { isCatalogTabActive } from "./lib/navigation";
 import { trackBusiness } from "./lib/telemetry";
 import { useStore } from "./store/AppStore";
-import type { CartItem, Product } from "./types";
+import { useCatalog } from "./store/CatalogStore";
+import type { CartItem, Product, ProductSuggestion } from "./types";
 
 const categoryEmoji: Record<string, string> = {
   digital: "🎧",
@@ -56,11 +57,32 @@ function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const { cartCount, favorites, setCartOpen } = useStore();
+  const { categories } = useCatalog();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [megaOpen, setMegaOpen] = useState(false);
-  const suggestions = useMemo(() => getSuggestions(query), [query]);
+  const [suggestions, setSuggestions] = useState<ProductSuggestion[]>([]);
   const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const value = query.trim();
+    if (!value) {
+      setSuggestions([]);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      api.suggestions(value).then((response) => {
+        if (active) setSuggestions(response.items);
+      }).catch(() => {
+        if (active) setSuggestions([]);
+      });
+    }, 160);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
@@ -198,10 +220,10 @@ function Header() {
                         key={product.id}
                         onClick={() => setFocused(false)}
                       >
-                        <img src={product.images[0]} alt="" />
+                        <img src={product.image} alt="" />
                         <span>
                           <strong>{product.title}</strong>
-                          <small>{product.brand} · {money(product.variants[0].price)}</small>
+                          <small>{product.brand} · {money(product.price)}</small>
                         </span>
                         <ArrowRight size={16} />
                       </Link>
@@ -394,6 +416,7 @@ export function CartLine({
   compact?: boolean;
 }) {
   const { updateQuantity, removeItems, toggleSelected } = useStore();
+  const { getProductById, getVariant } = useCatalog();
   const product = getProductById(item.productId);
   if (!product) return null;
   const variant = getVariant(product, item.variantId);
@@ -484,6 +507,7 @@ function CartDrawer() {
 
 function CompareDock() {
   const { compare, toggleCompare } = useStore();
+  const { getProductById } = useCatalog();
   if (!compare.length) return null;
   const items = compare.map(getProductById).filter(Boolean) as Product[];
   return (
