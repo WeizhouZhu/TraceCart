@@ -20,6 +20,12 @@ describe("collection metadata", () => {
     expect(first.changed).toBe(true);
     expect(second.changed).toBe(false);
     expect(new Set(second.sourceSubtypes.map((item) => item.id)).size).toBe(second.sourceSubtypes.length);
+    expect(second.sourceSubtypes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "ai.browser_semantic", label: "ai" }),
+      expect.objectContaining({ id: "ai.visual_gui", label: "ai" }),
+      expect.objectContaining({ id: "ai.workflow_hybrid", label: "ai" }),
+      expect.objectContaining({ id: "ai.multi_agent", label: "ai" }),
+    ]));
   });
 
   it("uses a legacy subtype for old clients and rejects disabled definitions", () => {

@@ -76,6 +76,7 @@ const seeds: Seed[] = [
 
 const colors = ["曜石黑", "雾银", "海盐白", "松石绿", "暮光蓝"];
 const optionNames = ["标准版", "进阶版", "旗舰版"];
+const unavailableFixtureTitles = new Set(["RestLab 助眠香氛机"]);
 
 function seededNumber(input: string) {
   return [...input].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 2166136261);
@@ -112,7 +113,9 @@ function makeVariants(seed: Seed, index: number): ProductVariant[] {
       },
       price: seed.price + uplift,
       compareAtPrice: Math.round((seed.price + uplift) * 1.18),
-      stock: 5 + ((seededNumber(seed.title) + variantIndex * 17) % 94),
+      stock: unavailableFixtureTitles.has(seed.title)
+        ? 0
+        : 5 + ((seededNumber(seed.title) + variantIndex * 17) % 94),
       image: seed.image,
     };
   });

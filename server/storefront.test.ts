@@ -10,6 +10,14 @@ describe("storefront backend", () => {
     expect(getSuggestions("Aurora")[0]?.brand).toBe("Aurora");
   });
 
+  it("keeps the unavailable recovery fixture deterministic", () => {
+    const product = products.find((item) => item.id === "product-20");
+    expect(product?.title).toBe("RestLab 助眠香氛机");
+    expect(product?.categoryId).toBe("wellness");
+    expect(product?.variants.length).toBeGreaterThan(0);
+    expect(product?.variants.every((variant) => variant.stock === 0)).toBe(true);
+  });
+
   it("validates cart pricing on the server", () => {
     const product = products[0];
     const variant = product.variants[0];
